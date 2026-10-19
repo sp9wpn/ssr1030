@@ -163,6 +163,7 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
     +47.23 ms  AA                     -20.1 ▒▒▒
 ```
 
+- **Scale:** fixed, from −40 dBFS (just below the noise floor) to +3 dBFS (where I/Q clipping starts), so bar lengths compare between bursts. The header shows the gain each burst was received with.
 - **Each row:** time relative to the middle of the beam pass, amplitude = P6 for Mode S and P1 for A/C, query token (12 characters), target (8 characters: callsign when known, else hex address), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
 - **Bar character:**
   - `█` in-beam query

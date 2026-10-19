@@ -109,6 +109,9 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
 static const char *gp_char(int cls) { return cls == GP_BEAM ? "\u2588" : cls == GP_SIDE ? "\u2591" : "\u2592"; }
 static const char *gp_color(int cls) { return cls == GP_BEAM ? GRN : cls == GP_SIDE ? YEL : DIM; }
 
+#define GRAPH_BOT_DBFS (-40.0f)
+#define GRAPH_TOP_DBFS (3.0f)
+
 static int g_scroll, g_burst = -1, g_page = 20, g_key;
 static bool frozen_view;
 
@@ -146,8 +149,10 @@ static void draw_graph(int cols, int rows)
         if (!isnan(b->gp[i].p5) && b->gp[i].p5 < amin) amin = b->gp[i].p5;
         if (b->gp[i].cls == GP_BEAM) first_beam = i;
     }
-    float ytop = amax, ybot = amin - 1;
-    if (ytop - ybot < 20) ybot = ytop - 20;
+    /* fixed scale: left edge just below the noise floor, right edge where
+     * I/Q clipping starts, so bars compare between bursts */
+    float ytop = GRAPH_TOP_DBFS, ybot = GRAPH_BOT_DBFS;
+    (void)amax; (void)amin;
 
     int page = rows - 3;
     if (page < 5) page = 5;
@@ -170,9 +175,9 @@ static void draw_graph(int cols, int rows)
     int last = g_scroll + page < n ? g_scroll + page : n;
 
     printf(B "Burst #%d %s%s" R "  dur %.1f ms  peak %.1f dBFS  gain %.0f dB  beam %d  sidelobe %d  weak %d"
-           DIM "   rows %d-%d of %d   \u2191\u2193 PgUp PgDn Home End   b back" R EL,
+           DIM "  rows %d-%d/%d  bars %.0f..%+.0f dBFS" R EL,
            b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n, b->nside,
-           b->nweak, g_scroll + 1, last, n);
+           b->nweak, g_scroll + 1, last, n, GRAPH_BOT_DBFS, GRAPH_TOP_DBFS);
 
     /* bar width: screen minus the row prefix, 5 columns spare */
     char probe[96];
