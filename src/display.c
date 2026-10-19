@@ -52,6 +52,14 @@ static int term_rows(void)
     return 50;
 }
 
+/* burst table column headers (the UF11 column gets a longer name than its token) */
+static const char *tbl_label(int g) { return g == G_SALL ? "UF11-all" : group_label(g); }
+static int tbl_w(int g)
+{
+    int w = (int)strlen(tbl_label(g));
+    return w > 6 ? w : 6;
+}
+
 /* bottom line: filter input, last command result, or key help. On the last
  * screen row it must not end with a newline, or the terminal scrolls. */
 static void draw_status_line(const struct run_info *ri, bool last_row)
@@ -391,7 +399,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
 
     /* recent bursts */
     printf(B "%-5s %9s %-5s %7s %6s %4s %5s %7s", "Burst", "t[s]", "radar", "dur ms", "peak", "gain", "n", "P[s]");
-    for (int g = 0; g < G_COUNT; g++) printf(" %6s", group_label(g));
+    for (int g = 0; g < G_COUNT; g++) printf(" %*s", tbl_w(g), tbl_label(g));
     printf(R EL);
     int nb = AS.nhist < 8 ? AS.nhist : 8;
     for (int i = AS.nhist - nb; i < AS.nhist; i++) {
@@ -400,8 +408,8 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
                1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n);
         if (b->period > 0) printf(" %7.3f", b->period); else printf(" %7s", "-");
         for (int g = 0; g < G_COUNT; g++) {
-            if (b->gcnt[g]) printf(" %6d", b->gcnt[g]);
-            else printf(" " DIM "%6s" R, ".");
+            if (b->gcnt[g]) printf(" %*d", tbl_w(g), b->gcnt[g]);
+            else printf(" " DIM "%*s" R, tbl_w(g), ".");
         }
         fputs(EL, stdout);
     }

@@ -184,7 +184,7 @@ They are left out of all radar analysis.
 - **Per radar:** rotation period (median time between burst peaks), dwell time, and interrogations per burst by query type (avg/min/max).
 - **Burst table columns** (each interrogation counted once, so they add up to `n`):
   - `AA/CC`, `A/C`, `ACSall`: plain Mode A/C, A/C-only all-calls, A/C/S all-calls.
-  - `S`: UF11 all-calls.
+  - `UF11-all`: UF11 all-calls (token `S` in sequences).
   - `alt`, `sqk`: UF4 and UF5 roll-calls without a Comm-B request.
   - `acid`, `selAlt`, `trk`, `hdgSpd`: Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
   - `oBDS`: any other BDS.
