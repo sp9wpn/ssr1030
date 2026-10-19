@@ -76,6 +76,29 @@ static int tbl_w(int g)
 
 static void draw_status_line(const struct run_info *ri, bool last_row);
 
+/* print s cut to `width` visible columns (escape sequences and UTF-8
+ * continuation bytes do not count); resets attributes at the end */
+static void put_cut(const char *s, int width)
+{
+    int vis = 0;
+    for (const char *p = s; *p; p++) {
+        if (*p == '\033') {
+            const char *q = p;
+            while (*q && *q != 'm' && *q != 'K' && *q != 'H' && *q != 'J') q++;
+            fwrite(p, 1, (size_t)(q - p) + (*q ? 1 : 0), stdout);
+            if (!*q) break;
+            p = q;
+            continue;
+        }
+        if ((*p & 0xC0) != 0x80) {
+            if (vis >= width) break;
+            vis++;
+        }
+        fputc(*p, stdout);
+    }
+    fputs(R, stdout);
+}
+
 void display_status_only(const struct run_info *ri)
 {
     printf("\033[%d;1H", term_rows());
@@ -87,19 +110,23 @@ void display_status_only(const struct run_info *ri)
  * screen row it must not end with a newline, or the terminal scrolls. */
 static void draw_status_line(const struct run_info *ri, bool last_row)
 {
-    const char *end = last_row ? "\033[K" R : EL;
-    if (ri->frozen) fputs("\033[1;7m FROZEN (F) \033[0m ", stdout);
+    char line[512];
+    int o = 0;
+    if (ri->frozen) o += snprintf(line + o, sizeof(line) - o, "\033[1;7m FROZEN (F) \033[0m ");
     if (ri->cmd_mode)
-        printf(B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R "%s",
-               ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd, end);
+        snprintf(line + o, sizeof(line) - o, B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R,
+                 ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
     else if (ri->cmd_msg[0])
-        printf(YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  b graph  x reset"
-               R "%s", ri->cmd_msg, end);
+        snprintf(line + o, sizeof(line) - o, YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  b graph  F freeze  x reset" R,
+                 ri->cmd_msg);
     else if (ri->graph)
-        printf(DIM "keys: b dashboard  \u2191\u2193 PgUp PgDn Home End scroll  r radar filter  a aircraft filter  "
-               "S Mode S only  R roll-calls only  F freeze  q quit" R "%s", end);
-    else printf(DIM "keys: q quit  +/- VGA  L/l LNA  p RF amp (manual)  g auto gain  r radar filter  a aircraft filter  "
-                "S Mode S only  R roll-calls only  b burst graph  F freeze  x reset stats" R "%s", end);
+        snprintf(line + o, sizeof(line) - o, DIM "keys: b dashboard  \u2191\u2193 PgUp PgDn Home End scroll  r radar filter  a aircraft filter  "
+                 "S Mode S only  R roll-calls only  F freeze  q quit" R);
+    else snprintf(line + o, sizeof(line) - o, DIM "keys: q quit  +/- VGA  L/l LNA (manual)  p RF amp  g auto gain  r radar filter  a aircraft filter  "
+                  "S Mode S only  R roll-calls only  b burst graph  F freeze  x reset stats" R);
+    /* on the last row one column stays free so the terminal never wraps/scrolls */
+    put_cut(line, term_cols() - 1);
+    fputs(last_row ? "\033[K" : EL, stdout);
 }
 
 /* ---------- burst graph screen ('b') ----------
@@ -174,10 +201,15 @@ static void draw_graph(int cols, int rows)
     if (g_scroll < 0) g_scroll = 0;
     int last = g_scroll + page < n ? g_scroll + page : n;
 
-    printf(B "Burst #%d %s%s" R "  dur %.1f ms  peak %.1f dBFS  gain %.0f dB  beam %d  sidelobe %d  weak %d"
-           DIM "  rows %d-%d/%d  bars %.0f..%+.0f dBFS" R EL,
-           b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n, b->nside,
-           b->nweak, g_scroll + 1, last, n, GRAPH_BOT_DBFS, GRAPH_TOP_DBFS);
+    {
+        char hdr[256];
+        snprintf(hdr, sizeof(hdr), B "Burst #%d %s%s" R "  dur %.1f ms  peak %.1f dBFS  gain %.0f dB  beam %d  sidelobe %d  weak %d"
+                 DIM "  rows %d-%d/%d  bars %.0f..%+.0f dBFS" R,
+                 b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n, b->nside,
+                 b->nweak, g_scroll + 1, last, n, GRAPH_BOT_DBFS, GRAPH_TOP_DBFS);
+        put_cut(hdr, cols - 1);
+        fputs(EL, stdout);
+    }
 
     /* bar width: screen minus the row prefix, 5 columns spare */
     char probe[96];
