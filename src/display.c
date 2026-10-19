@@ -141,6 +141,9 @@ static void draw_graph(int cols, int rows)
         if (!isnan(b->gp[i].p2) && b->gp[i].p2 > amax) amax = b->gp[i].p2;
         if (!isnan(b->gp[i].p5) && b->gp[i].p5 > amax) amax = b->gp[i].p5;
         if (b->gp[i].amp < amin) amin = b->gp[i].amp;
+        /* the scale must also cover the SLS pulses, which are often weaker than every bar */
+        if (!isnan(b->gp[i].p2) && b->gp[i].p2 < amin) amin = b->gp[i].p2;
+        if (!isnan(b->gp[i].p5) && b->gp[i].p5 < amin) amin = b->gp[i].p5;
         if (b->gp[i].cls == GP_BEAM) first_beam = i;
     }
     float ytop = amax, ybot = amin - 1;
