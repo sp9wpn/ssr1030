@@ -19,7 +19,8 @@ enum kind {
     K_INTERMODE_OTHER,                /* mode 1/2/B/D with P4          */
     K_UF0, K_UF4, K_UF5, K_UF11, K_UF16, K_UF19, K_UF20, K_UF21, K_UF24,
     K_UF_OTHER,
-    K_S_NOSYNC,                       /* Mode S preamble+P6, no sync reversal (P5 SLS / garbled) */
+    K_S_NOSYNC,                       /* Mode S preamble+P6, sync masked by P5 (sidelobe) */
+    K_S_GARBLE,                       /* Mode S preamble+P6, no sync reversal and no P5 */
     K_COUNT
 };
 

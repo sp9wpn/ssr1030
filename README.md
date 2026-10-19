@@ -121,7 +121,7 @@ Close to the radar (a few km), start with `-l 16 -g 20`.
 | Mode S | P2 at 2 µs, P6 at 3.5 µs, then DPSK decode of UF0/4/5/11/16/19/20/21/24 |
 
 Each interrogation also carries these flags:
-- **SLS:** P2 ≥ P1 (A/C), or no sync phase reversal (Mode S: P5 present). Both mean a sidelobe.
+- **SLS:** P2 ≥ P1 (A/C), or P5 ≥ P6 (Mode S). Both mean a sidelobe.
 - **P2 level:** P2 relative to P1, in dB.
 - **S1:** a whisper-shout pulse is present.
 
@@ -198,7 +198,9 @@ They are left out of all radar analysis.
 | `acid` `setAlt` `trk` `hdgSpd` | Roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
 | `cap` `gicb` `pos` `met` `ra` `aicb` … | BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
 | `S-msg` | Comm-A UF20/21 (`S-msg/hdgSpd` = also requests BDS 6,0) |
-| `S-elm` `S-mil` `S-sls` | UF24 ELM, UF19, Mode S without sync (sidelobe) |
+| `S-elm` `S-mil` | UF24 ELM, UF19 |
+| `S-sls` | Mode S sidelobe: P5 at least as strong as P6, so a transponder would not decode it (P5 always measured) |
+| `S-grb` | Mode S with no sync reversal and no P5 (garbled) |
 
 Roll-calls carry the number of their target, for example `alt/1` or `setAlt/2#2`.
 Targets are listed under the sequence, numbered in alphabetical order of their callsign or hex: `targets: 1/452124 2/DLH123`.

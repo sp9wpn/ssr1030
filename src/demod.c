@@ -103,41 +103,72 @@ static float reversal_corr(struct demod *d, double t, int h, float complex *prod
     return mag > 0 ? crealf(p) / mag : 0;
 }
 
+static void p5_measure(struct demod *d, double ts, float *p5, float *p6)
+{
+    int a0 = (int)lround(0.125 * d->spus), a1 = (int)lround(0.375 * d->spus);
+    if (a1 <= a0) a1 = a0 + 1;
+    float complex z1 = 0, z2 = 0;
+    uint64_t c = (uint64_t)llround(ts);
+    for (int k = a0; k < a1; k++) { z1 += Z(d, c - k); z2 += Z(d, c + k); }
+    z1 /= (a1 - a0);
+    z2 /= (a1 - a0);
+    *p5 = cabsf(z1 + z2) / 2;
+    *p6 = cabsf(z1 - z2) / 2;
+}
+
 static void decode_modes(struct demod *d, struct interrog *it, double p6lead, double p6width)
 {
     double chip = 0.25 * d->spus;
     int h = (int)(chip / 2);
     if (h < 1) h = 1;
 
-    /* locate sync phase reversal near P6 + 1.25 us */
+    /* Locate the sync phase reversal near P6 + 1.25 us. It is the first
+     * reversal in P6 and data reversals follow at >= 0.5 us, so within
+     * +-0.35 us the earliest clear reversal (local minimum below -0.5) is
+     * the sync; otherwise fall back to the deepest point. */
     double exp_sync = p6lead + 1.25 * d->spus;
     double best_t = exp_sync;
     float best = 2;
-    int span = (int)lround(0.125 * d->spus);
-    for (int o = -span; o <= span; o++) {
+    int span = (int)lround(0.35 * d->spus);
+    float cprev = 2;
+    bool found = false;
+    for (int o = -span; o <= span + 1; o++) {
         float c = reversal_corr(d, exp_sync + o, h, NULL);
-        if (c < best) { best = c; best_t = exp_sync + o; }
+        if (o > -span && cprev < -0.5f && cprev <= c) {     /* local minimum at o - 1 */
+            best = cprev; best_t = exp_sync + o - 1; found = true;
+            break;
+        }
+        cprev = c;
+    }
+    if (!found) {
+        for (int o = -span; o <= span; o++) {
+            float c = reversal_corr(d, exp_sync + o, h, NULL);
+            if (c < best) { best = c; best_t = exp_sync + o; }
+        }
     }
     it->sync = best;
 
     /* P5 (Mode S SLS) overlaps the sync reversal. P6 flips phase there, P5
      * does not: with z1/z2 the mean samples just before/after the reversal,
-     * P5 = |z1 + z2| / 2 and P6 = |z1 - z2| / 2. Uses the nominal sync when
-     * a strong P5 masks the reversal. */
+     * P5 = |z1 + z2| / 2 and P6 = |z1 - z2| / 2. Measured at the nominal and
+     * at the found sync position (a strong P5 can fake or mask the reversal);
+     * the larger P5 counts. */
     {
-        double ts = best > -0.5f ? exp_sync : best_t;
-        int a0 = (int)lround(0.125 * d->spus), a1 = (int)lround(0.375 * d->spus);
-        if (a1 <= a0) a1 = a0 + 1;
-        float complex z1 = 0, z2 = 0;
-        uint64_t c = (uint64_t)llround(ts);
-        for (int k = a0; k < a1; k++) { z1 += Z(d, c - k); z2 += Z(d, c + k); }
-        z1 /= (a1 - a0); z2 /= (a1 - a0);
-        float p5 = cabsf(z1 + z2) / 2;
+        float p5 = 0, p6 = 0;
+        double pos[2] = { exp_sync, best_t };
+        for (int q = 0; q < (best_t != exp_sync ? 2 : 1); q++) {
+            float a5, a6;
+            p5_measure(d, pos[q], &a5, &a6);
+            if (a5 > p5) { p5 = a5; p6 = a6; }
+        }
         it->p5_db = p5 >= d->thr ? dbfs(p5) : NAN;     /* absolute here, made relative to P1 by the caller */
+        /* transponder rule: P5 at least as strong as P6 suppresses decoding */
+        if (!isnan(it->p5_db) && p5 >= p6) best = 2;
     }
     if (best > -0.5f) {
-        it->kind = K_S_NOSYNC;
-        it->sidelobe = true;
+        /* no sync: a stronger P5 (sidelobe) masks it, or the signal is garbled */
+        it->kind = isnan(it->p5_db) ? K_S_GARBLE : K_S_NOSYNC;
+        it->sidelobe = !isnan(it->p5_db);
         return;
     }
 

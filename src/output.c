@@ -35,7 +35,7 @@ void output_write(const struct interrog *it, double start_epoch)
     char radar[8], cs[12] = "-";
     radar_code_str(it->radar, radar, sizeof(radar));
     if (radar[0] == '?') snprintf(radar, sizeof(radar), "-");
-    if (kind_is_modes(it->kind) && it->kind != K_S_NOSYNC) {
+    if (kind_is_modes(it->kind) && it->kind < K_S_NOSYNC) {
         snprintf(addr, sizeof(addr), "%06X", it->addr);
         const char *c = cs_lookup(it->addr);
         if (c) snprintf(cs, sizeof(cs), "%s", c);
@@ -72,12 +72,12 @@ void output_close(void)
 void print_interrog_line(FILE *f, const struct interrog *it)
 {
     char desc[160] = "";
-    if (kind_is_modes(it->kind) && it->kind != K_S_NOSYNC) modes_describe(it, desc, sizeof(desc));
+    if (kind_is_modes(it->kind) && it->kind < K_S_NOSYNC) modes_describe(it, desc, sizeof(desc));
     char p2[24] = "";
     if (!isnan(it->p2_db) && !kind_is_modes(it->kind)) snprintf(p2, sizeof(p2), "P2%+.0fdB", it->p2_db);
     else if (!isnan(it->p5_db)) snprintf(p2, sizeof(p2), "P5%+.0fdB", it->p5_db);
     char q[12] = "";
-    if (kind_is_modes(it->kind) && it->kind != K_S_NOSYNC) snprintf(q, sizeof(q), "q%.2f ", it->quality);
+    if (kind_is_modes(it->kind) && it->kind < K_S_NOSYNC) snprintf(q, sizeof(q), "q%.2f ", it->quality);
     char rc[8];
     radar_code_str(it->radar, rc, sizeof(rc));
     fprintf(f, "%12.6f %-24s %6.1fdBFS %-8s %-4s %s%s%s%s%s %s%s\n", it->t, kind_label(it->kind),

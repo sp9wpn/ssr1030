@@ -180,16 +180,16 @@ static const char *labels[K_COUNT] = {
     "UF0  ACAS short", "UF4  surv. altitude", "UF5  surv. identity",
     "UF11 Mode S all-call", "UF16 ACAS long", "UF19 military",
     "UF20 Comm-A altitude", "UF21 Comm-A identity", "UF24 Comm-C ELM",
-    "UF other", "Mode S no sync (P5/SLS)"
+    "UF other", "Mode S no sync (P5/SLS)", "Mode S no sync (garbled)"
 };
 static const char *tokens[K_COUNT] = {
     "1", "2", "AA", "B", "CC", "D", "A", "C", "As", "Cs", "I?",
-    "S-acas", "alt", "sqk", "S", "S-acasL", "S-mil", "S-msg", "S-msg", "S-elm", "S-?", "S-sls"
+    "S-acas", "alt", "sqk", "S", "S-acasL", "S-mil", "S-msg", "S-msg", "S-elm", "S-?", "S-sls", "S-grb"
 };
 
 static const char *names[K_COUNT] = {
     "M1", "M2", "MA", "MB", "MC", "MD", "ACONLY_A", "ACONLY_C", "ACS_A", "ACS_C", "INTERMODE",
-    "UF0", "UF4", "UF5", "UF11", "UF16", "UF19", "UF20", "UF21", "UF24", "UF_OTHER", "S_NOSYNC"
+    "UF0", "UF4", "UF5", "UF11", "UF16", "UF19", "UF20", "UF21", "UF24", "UF_OTHER", "S_NOSYNC", "S_GARBLE"
 };
 
 const char *kind_name(int k) { return (k >= 0 && k < K_COUNT) ? names[k] : "?"; }
