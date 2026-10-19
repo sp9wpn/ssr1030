@@ -486,7 +486,7 @@ static void usage(void)
 "      --serial SN        HackRF serial number\n"
 "  -t, --duration S       stop after S seconds\n\n"
 "Filters (apply to statistics, bursts, logs and list):\n"
-"  -r, --radar CODE       keep only one radar, e.g. SI17 or II3; A/C interrogations are\n"
+"  -r, --radar CODE       keep only one radar: SI1-63 or II0-15; A/C interrogations are\n"
 "                         attributed via the beam burst or the preceding UF11, else dropped\n"
 "  -S, --modes-only       drop Mode A/C and intermode (A/C-only, A/C/S all-call) interrogations\n"
 "  -R, --rollcall-only    keep only interrogations addressed to an aircraft (UF4/5/20/21/24/19):\n"

@@ -69,7 +69,7 @@ Dashboard keys:
 | `L` / `l` | LNA ±8 dB |
 | `p` | RF amp on/off |
 | `g` | Automatic gain on/off |
-| `r` | Radar filter: type `SI17` or `II3`, then `Enter` |
+| `r` | Radar filter: type an SI code (`SI1`–`SI63`) or II code (`II0`–`II15`), then `Enter` |
 | `a` | Aircraft filter: type a hex address or a callsign, then `Enter` |
 | `x` | Reset statistics |
 
