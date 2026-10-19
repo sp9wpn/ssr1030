@@ -448,62 +448,74 @@ static bool graph_extra_ok(const struct interrog *y)
     return true;
 }
 
-static void graph_add(struct burst *b, const struct interrog *y, double t0, int cls, int ka)
+static void graph_put(struct burst *b, double t, float amp, uint16_t tok, int ka, int cls)
 {
     if (b->ngp >= SEQ_MAX) return;
     struct gpoint *g = &b->gp[b->ngp++];
-    g->dt = (float)((y->t - t0) * 1e3);
-    g->amp = y->amp_db;
-    g->tok = seq_token(y);
+    g->t = t;
+    g->amp = amp;
+    g->tok = tok;
     g->ka = (uint8_t)ka;
     g->cls = (uint8_t)cls;
     if (cls == GP_SIDE) b->nside++;
     if (cls == GP_WEAK) b->nweak++;
 }
 
-/* recent non-beam queries (sidelobe / weak), so the graph can show the
- * time around a burst; queries after the commit are appended to it */
-#define GRING 1024
+static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka)
+{
+    graph_put(b, y->t, y->amp_db, seq_token(y), ka, cls);
+}
+
+/* Non-beam queries for the graph. Sidelobes are kept from half a rotation
+ * before to half a rotation after a burst, other weak queries only within
+ * one dwell. A ring holds the recent past; open post-windows collect the
+ * queries that arrive after a burst was committed. */
+#define GRING 16384
+#define NPOST 8
 static struct { double t; float amp; uint16_t tok; uint8_t cls; } gring[GRING];
 static uint64_t gring_n;
-static int post_idx = -1;              /* AS.hist slot receiving late queries */
-static double post_t0, post_until;
+static struct { int idx; double until_side, until_weak; } posts[NPOST];
+static int nposts;
 
 static void graph_note(const struct interrog *y)
 {
     if (y->burst >= 0 || !graph_extra_ok(y)) return;
     int cls = y->sidelobe ? GP_SIDE : GP_WEAK;
-    if (post_idx >= 0 && y->t <= post_until) {
-        struct burst *b = &AS.hist[post_idx % BURST_HIST];
-        if (b->ngp < SEQ_MAX) {
-            struct gpoint *g = &b->gp[b->ngp++];
-            g->dt = (float)((y->t - post_t0) * 1e3);
-            g->amp = y->amp_db; g->tok = seq_token(y); g->ka = NO_TARGET; g->cls = (uint8_t)cls;
-            if (cls == GP_SIDE) b->nside++; else b->nweak++;
-        }
-        return;
+    uint16_t tok = seq_token(y);
+    for (int p = 0; p < nposts; p++) {
+        double until = cls == GP_SIDE ? posts[p].until_side : posts[p].until_weak;
+        if (y->t <= until && AS.nhist - posts[p].idx <= BURST_HIST)
+            graph_put(&AS.hist[posts[p].idx % BURST_HIST], y->t, y->amp_db, tok, NO_TARGET, cls);
     }
     int i = gring_n++ % GRING;
-    gring[i].t = y->t; gring[i].amp = y->amp_db; gring[i].tok = seq_token(y); gring[i].cls = (uint8_t)cls;
+    gring[i].t = y->t; gring[i].amp = y->amp_db; gring[i].tok = tok; gring[i].cls = (uint8_t)cls;
 }
 
 static int cmp_gp(const void *x, const void *y)
 {
-    float a = ((const struct gpoint *)x)->dt, b = ((const struct gpoint *)y)->dt;
+    double a = ((const struct gpoint *)x)->t, b = ((const struct gpoint *)y)->t;
     return (a > b) - (a < b);
 }
 
-/* before commit: add buffered non-beam queries within margin of the burst */
-static void graph_context(struct burst *b, double t0, double t1, double margin)
+static double half_rotation(int code)
+{
+    for (int r = 0; r < AS.nradars; r++)
+        if (AS.radars[r].code == code && AS.radars[r].np)
+            return 0.5 * median_d(AS.radars[r].periods, AS.radars[r].np < 64 ? AS.radars[r].np : 64);
+    double rot = analysis_rotation();
+    return rot > 0 ? 0.5 * rot : 2.0;
+}
+
+/* before commit: add buffered non-beam queries preceding / inside the burst */
+static void graph_context(struct burst *b, double t0, double t1, double margin, double half)
 {
     uint64_t first = gring_n > GRING ? gring_n - GRING : 0;
     for (uint64_t k = first; k < gring_n; k++) {
         int i = k % GRING;
-        if (gring[i].t < t0 - margin || gring[i].t > t1 + margin || b->ngp >= SEQ_MAX) continue;
-        struct gpoint *g = &b->gp[b->ngp++];
-        g->dt = (float)((gring[i].t - t0) * 1e3);
-        g->amp = gring[i].amp; g->tok = gring[i].tok; g->ka = NO_TARGET; g->cls = gring[i].cls;
-        if (g->cls == GP_SIDE) b->nside++; else b->nweak++;
+        double lo = gring[i].cls == GP_SIDE ? t0 - half : t0 - margin;
+        double hi = gring[i].cls == GP_SIDE ? t1 + half : t1 + margin;
+        if (gring[i].t < lo || gring[i].t > hi) continue;
+        graph_put(b, gring[i].t, gring[i].amp, gring[i].tok, NO_TARGET, gring[i].cls);
     }
     qsort(b->gp, b->ngp, sizeof(b->gp[0]), cmp_gp);
 }
@@ -602,7 +614,7 @@ void burst_targets(const struct burst *b, const int *rank, char *out, size_t n)
 
 /* drain the output queue through stage 2; members of burst `id` are
  * collected into rec when valid */
-static void drain(int id, int code, bool valid, struct burst *rec, double t0)
+static void drain(int id, int code, bool valid, struct burst *rec)
 {
     while (ot < oh) {
         struct interrog *y = &outq[ot++ % OUTQ];
@@ -612,7 +624,7 @@ static void drain(int id, int code, bool valid, struct burst *rec, double t0)
         if (!valid || !rec) continue;
         if (pass && member) {
             int ka = rec_add(rec, y);
-            graph_add(rec, y, t0, GP_BEAM, ka);
+            graph_add(rec, y, GP_BEAM, ka);
         }
     }
 }
@@ -631,17 +643,24 @@ static void close_burst(void)
     rec.id = o->id;
     rec.code = code;
     rec.partial = o->partial;
-    drain(o->id, code, valid, &rec, o->t0);
+    drain(o->id, code, valid, &rec);
     if (valid && (AS.cfg.radar_sel < 0 || code == AS.cfg.radar_sel)) AS.last_burst_end = o->t1;
     if (valid && rec.n > 0) {
         double margin = o->t1 - o->t0;
         if (margin < 0.03) margin = 0.03;
         if (margin > 0.2) margin = 0.2;
-        graph_context(&rec, o->t0, o->t1, margin);
+        double half = half_rotation(code);
+        graph_context(&rec, o->t0, o->t1, margin, half);
         commit(&rec);
-        post_idx = AS.nhist - 1;
-        post_t0 = o->t0;
-        post_until = o->t1 + margin;
+        /* keep collecting late queries for this burst; drop expired windows */
+        int w = 0;
+        for (int p = 0; p < nposts; p++) if (posts[p].until_side >= o->t1) posts[w++] = posts[p];
+        nposts = w;
+        if (nposts == NPOST) { memmove(posts, posts + 1, sizeof(posts[0]) * (NPOST - 1)); nposts--; }
+        posts[nposts].idx = AS.nhist - 1;
+        posts[nposts].until_side = o->t1 + half;
+        posts[nposts].until_weak = o->t1 + margin;
+        nposts++;
     }
 }
 
@@ -689,7 +708,7 @@ static void stage1(struct interrog *x, uint64_t idx)
         outq[oh++ % OUTQ] = *x;
         if (oh - ot >= OUTQ - 1) close_burst();
     } else {
-        drain(-1, -1, false, NULL, 0);
+        drain(-1, -1, false, NULL);
         stage2(x, -1);
     }
 }
@@ -702,14 +721,14 @@ void analysis_tick(double now)
         stage1(&pend[idx % PENDING], idx);
     }
     if (AS.ob.open && now - LOOKAHEAD - AS.ob.t1 > AS.cfg.burst_gap) close_burst();
-    if (now >= 1e299) { close_burst(); drain(-1, -1, false, NULL, 0); }
+    if (now >= 1e299) { close_burst(); drain(-1, -1, false, NULL); }
 }
 
 void analysis_gap(double t0, double t1)
 {
     analysis_tick(t0 + LOOKAHEAD + 1e-6);
     if (AS.ob.open) { AS.ob.partial = true; close_burst(); }
-    drain(-1, -1, false, NULL, 0);
+    drain(-1, -1, false, NULL);
     for (int r = 0; r < AS.nradars; r++) AS.radars[r].gap_since = true;
     AS.gap_end = t1;
 }

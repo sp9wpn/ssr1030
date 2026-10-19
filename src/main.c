@@ -371,16 +371,24 @@ static void apply_input(struct run_info *ri, char kind, char *arg)
     }
 }
 
-/* drop the rest of an escape sequence (arrow keys etc.);
- * returns false for a bare Esc key */
-static bool eat_escape(void)
+/* read the rest of an escape sequence; returns 0 for a bare Esc, else a
+ * key code: 'U' up, 'D' down, 'P' PgUp, 'N' PgDn, 'H' Home, 'E' End, '?' other */
+static int eat_escape(void)
 {
-    char c;
-    if (read(0, &c, 1) != 1) return false;
-    if (c != '[' && c != 'O') return true;
-    while (read(0, &c, 1) == 1)
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') break;
-    return true;
+    char c, num = 0;
+    if (read(0, &c, 1) != 1) return 0;
+    if (c != '[' && c != 'O') return '?';
+    while (read(0, &c, 1) == 1) {
+        if (c >= '0' && c <= '9') { num = c; continue; }
+        if (c == 'A') return 'U';
+        if (c == 'B') return 'D';
+        if (c == 'H') return 'H';
+        if (c == 'F') return 'E';
+        if (c == '~') return num == '5' ? 'P' : num == '6' ? 'N' : (num == '1' || num == '7') ? 'H' :
+                              (num == '4' || num == '8') ? 'E' : '?';
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) return '?';
+    }
+    return '?';
 }
 
 /* returns true when the screen should be redrawn now */
@@ -397,7 +405,7 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
                 edit_kind = 0;
                 apply_input(ri, k, cmd_buf);
             } else if (c == 27) {
-                if (!eat_escape()) {               /* bare Esc cancels; arrow keys are ignored */
+                if (eat_escape() == 0) {           /* bare Esc cancels; arrow keys are ignored */
                     edit_kind = 0;
                     snprintf(cmd_msg, sizeof(cmd_msg), "cancelled, filter unchanged");
                 }
@@ -410,7 +418,12 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             }
             continue;
         }
-        if (c == 27) { eat_escape(); continue; }
+        if (c == 27) {
+            int k = eat_escape();
+            if (show_graph && k && k != '?') display_graph_key(k);
+            continue;
+        }
+        if (show_graph && (c == 'j' || c == 'k')) { display_graph_key(c == 'j' ? 'D' : 'U'); continue; }
         if (c == 'r' || c == 'a') {
             edit_kind = c;
             /* start from the current filter so it can be edited */

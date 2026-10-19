@@ -173,6 +173,7 @@ struct run_info {
 void display_init(void);
 void display_restore(void);
 void display_render(const struct run_info *ri, double now, struct demod *d, uint64_t drops);
+void display_graph_key(int key);   /* 'U' 'D' 'P' 'N' 'H' 'E': scroll the burst graph */
 
 /* ---- output.c ---- */
 int output_open(const char *path, char sep);

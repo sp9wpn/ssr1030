@@ -48,109 +48,86 @@ static int term_cols(void)
 static int term_rows(void)
 {
     struct winsize w;
-    if (ioctl(1, TIOCGWINSZ, &w) == 0 && w.ws_row > 20) return w.ws_row;
+    if (ioctl(1, TIOCGWINSZ, &w) == 0 && w.ws_row > 5) return w.ws_row;
     return 50;
 }
 
 /* ---------- burst graph screen ('b') ----------
- * Top: amplitude (y, dBFS) against time from the first query (x, ms); one
- * vertical bar per query, strongest wins a shared column, beam over sidelobe
- * over weak at equal height. Bottom: every query as dt / token / amplitude. */
+ * One row per query, in time order: time relative to the middle of the beam
+ * pass, query/target, amplitude and a horizontal bar whose length is the
+ * amplitude. The bar character tells the class: beam, sidelobe, weak. */
 static const char *gp_char(int cls) { return cls == GP_BEAM ? "\u2588" : cls == GP_SIDE ? "\u2591" : "\u2592"; }
 static const char *gp_color(int cls) { return cls == GP_BEAM ? GRN : cls == GP_SIDE ? YEL : DIM; }
+
+static int g_scroll, g_burst = -1, g_page = 20, g_key;
+
+void display_graph_key(int key)
+{
+    g_key = key;            /* applied at the next draw, where the page size is known */
+}
 
 static void draw_graph(int cols, int rows)
 {
     const struct burst *b = analysis_graph_burst();
-    if (!b) {
-        printf(EL B "Burst graph" R DIM "  - waiting for a main-beam burst   ('b' back to dashboard)" R EL);
+    if (!b || !b->ngp) {
+        printf(B "Burst graph" R DIM "  waiting for a main-beam burst   b back" R EL);
         return;
     }
-    int ngp = b->ngp;
-    float tmin = 1e9, tmax = -1e9, amax = -99, amin = 99;
-    for (int i = 0; i < ngp; i++) {
-        const struct gpoint *g = &b->gp[i];
-        if (g->dt < tmin) tmin = g->dt;
-        if (g->dt > tmax) tmax = g->dt;
-        if (g->amp > amax) amax = g->amp;
-        if (g->amp < amin) amin = g->amp;
+    double mid = 0.5 * (b->t0 + b->t1);
+    int n = b->ngp, first_beam = 0;
+    float amax = -99, amin = 99;
+    for (int i = n - 1; i >= 0; i--) {
+        if (b->gp[i].amp > amax) amax = b->gp[i].amp;
+        if (b->gp[i].amp < amin) amin = b->gp[i].amp;
+        if (b->gp[i].cls == GP_BEAM) first_beam = i;
     }
-    float span = tmax - tmin;
-    if (span < 1) span = 1;
-    float ytop = ceilf((amax + 1) / 2) * 2, ybot = floorf((amin - 1) / 2) * 2;
-    if (ytop - ybot < 12) ybot = ytop - 12;
+    float ytop = amax, ybot = amin - 1;
+    if (ytop - ybot < 20) ybot = ytop - 20;
+
+    int page = rows - 3;
+    if (page < 5) page = 5;
+    g_page = page;
+    if (b->id != g_burst) {                 /* new burst: start just before the beam */
+        g_burst = b->id;
+        g_scroll = first_beam - page / 4;
+    }
+    switch (g_key) {
+    case 'U': g_scroll--; break;
+    case 'D': g_scroll++; break;
+    case 'P': g_scroll -= page - 1; break;
+    case 'N': g_scroll += page - 1; break;
+    case 'H': g_scroll = 0; break;
+    case 'E': g_scroll = n; break;
+    }
+    g_key = 0;
+    if (g_scroll > n - page) g_scroll = n - page;
+    if (g_scroll < 0) g_scroll = 0;
+    int last = g_scroll + page < n ? g_scroll + page : n;
 
     int rank[64];
     burst_ranks(b, rank);
-    char tl[1024];
-    burst_targets(b, rank, tl, sizeof(tl));
-    printf(B "Burst #%d %s%s" R "  t=%.3f s  dur %.1f ms  peak %.1f dBFS  gain %.0f dB  " GRN "%s" R " beam %d  "
-           YEL "%s" R " sidelobe %d  " DIM "%s" R " weak %d   " DIM "('b' back to dashboard)" R EL,
-           b->id, b->key, b->partial ? "*" : "", b->t0, 1e3 * (b->t1 - b->t0), b->peak, b->gain,
-           gp_char(GP_BEAM), b->n, gp_char(GP_SIDE), b->nside, gp_char(GP_WEAK), b->nweak);
-    if (b->naddr) printf("  targets: %.*s" EL, cols - 14, tl);
-    else fputs(EL, stdout);
+    printf(B "Burst #%d %s%s" R "  dur %.1f ms  peak %.1f dBFS  gain %.0f dB  beam %d  sidelobe %d  weak %d"
+           DIM "   rows %d-%d of %d   \u2191\u2193 PgUp PgDn Home End   b back" R EL,
+           b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n, b->nside,
+           b->nweak, g_scroll + 1, last, n);
 
-    /* chart */
-    int W = cols - 10;
-    if (W < 20) W = 20;
-    int H = rows / 2 - 6;
-    if (H > 24) H = 24;
-    if (H < 8) H = 8;
-    static float colamp[3][1024];
-    if (W > 1024) W = 1024;
-    for (int c = 0; c < 3; c++) for (int x = 0; x < W; x++) colamp[c][x] = -999;
-    for (int i = 0; i < ngp; i++) {
+    int W = cols - 36;
+    if (W < 10) W = 10;
+    for (int i = g_scroll; i < last; i++) {
         const struct gpoint *g = &b->gp[i];
-        int x = (int)lroundf((g->dt - tmin) / span * (W - 1));
-        if (g->amp > colamp[g->cls - 1][x]) colamp[g->cls - 1][x] = g->amp;
-    }
-    for (int r = 0; r < H; r++) {
-        float lvl = ytop - (ytop - ybot) * (r + 0.5f) / H;
-        if (r % 4 == 0) printf("%6.1f \u2524", ytop - (ytop - ybot) * r / H);
-        else printf("       \u2502");
-        int cur = -1;
-        for (int x = 0; x < W; x++) {
-            int cls = 0;
-            for (int c = 0; c < 3 && !cls; c++) if (colamp[c][x] >= lvl) cls = c + 1;
-            if (cls != cur) { fputs(R, stdout); if (cls) fputs(gp_color(cls), stdout); cur = cls; }
-            fputs(cls ? gp_char(cls) : " ", stdout);
-        }
+        char ts[24], tok[32];
+        seq_token_str(g->tok, ts, sizeof(ts));
+        if (g->ka != NO_TARGET) snprintf(tok, sizeof(tok), "%s/%d", ts, rank[g->ka]);
+        else snprintf(tok, sizeof(tok), "%s", ts);
+        int len = (int)lroundf((g->amp - ybot) / (ytop - ybot) * W);
+        if (len < 1) len = 1;
+        if (len > W) len = W;
+        printf("%s%+10.2f ms  %-13s %6.1f " , g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), tok, g->amp);
+        fputs(R, stdout);
+        fputs(gp_color(g->cls), stdout);
+        for (int k = 0; k < len; k++) fputs(gp_char(g->cls), stdout);
         fputs(R EL, stdout);
     }
-    printf("%6.1f \u2514", ybot);
-    for (int x = 0; x < W; x++) fputs(x % 10 == 0 ? "\u252c" : "\u2500", stdout);
-    fputs(EL "        ", stdout);
-    for (int x = 0; x < W; x += 10) {
-        char lab[16];
-        snprintf(lab, sizeof(lab), "%.1f", span * x / (W - 1));
-        printf("%-10s", lab);
-    }
-    printf(EL DIM "        ms after first query (dBFS on the left)" R EL);
-
-    /* query list, column-major in time order */
-    int used = 3 + (b->naddr ? 0 : 0) + H + 3 + 2;
-    int lrows = rows - used - 1;
-    if (lrows < 3) lrows = 3;
-    int cw = 30, ncol = (cols - 1) / cw;
-    if (ncol < 1) ncol = 1;
-    printf(B "%d queries" R DIM "  (ms  query/target  dBFS)" R EL, ngp);
-    int shown = lrows * ncol < ngp ? lrows * ncol : ngp;
-    int nr = (shown + ncol - 1) / ncol;
-    for (int r = 0; r < nr; r++) {
-        for (int c = 0; c < ncol; c++) {
-            int i = c * nr + r;
-            if (i >= shown) break;
-            const struct gpoint *g = &b->gp[i];
-            char ts[24], tok[32];
-            seq_token_str(g->tok, ts, sizeof(ts));
-            if (g->ka != NO_TARGET) snprintf(tok, sizeof(tok), "%s/%d", ts, rank[g->ka]);
-            else snprintf(tok, sizeof(tok), "%s", ts);
-            printf("%s%s" R " %7.2f %-13s %6.1f   ", gp_color(g->cls), gp_char(g->cls), g->dt - tmin, tok, g->amp);
-        }
-        fputs(EL, stdout);
-    }
-    if (shown < ngp) printf(DIM "  ... %d more (enlarge the terminal)" R EL, ngp - shown);
 }
 
 static void print_seq(const struct burst *b, int cols, int maxlines)

@@ -19,7 +19,7 @@ enum group { G_AC, G_ACONLY, G_ACS, G_SALL, G_SALT, G_SSQK, G_CAL, G_SETALT, G_T
 
 /* one query in the burst graph */
 struct gpoint {
-    float dt;               /* ms after the burst's first member */
+    double t;               /* stream time, s */
     float amp;              /* dBFS */
     uint16_t tok;           /* seq_token */
     uint8_t ka;             /* target index, NO_TARGET when none */
@@ -45,7 +45,7 @@ struct burst {
     uint32_t addrs[64];
     double period;          /* time since previous burst of the same radar */
     float gain;             /* nominal receiver gain at commit */
-    struct gpoint gp[SEQ_MAX];  /* every query in the burst's time span, incl. sidelobes */
+    struct gpoint gp[SEQ_MAX];  /* beam queries + sidelobes within half a rotation + weak nearby */
     int ngp, nside, nweak;
 };
 

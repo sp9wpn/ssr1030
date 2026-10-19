@@ -140,15 +140,26 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 
 ## Burst graph (`b`)
 
-`b` switches the whole screen to the latest beam pass of the main radar. Press `b` again to return.
+`b` switches the whole screen to the latest beam pass of the main radar, one row per query in time order:
 
-- **Chart:** amplitude (dBFS, y) against time from the first query (ms, x), with one vertical bar per query. The antenna beam shape shows directly.
-  - `█` in-beam query (green)
-  - `░` sidelobe query (yellow): SLS, meaning P2 ≥ P1 or Mode S without sync
-  - `▒` other weak query (dim): below the beam threshold, not SLS
-- **Context:** the chart also covers one dwell time (30–200 ms) before and after the pass, so sidelobes and beam edges around it are visible.
-- **Below the chart:** every query, with time (ms), query token and target number (as in the burst sequence) and amplitude.
-- **Filters:** the type and aircraft filters apply. Sidelobe and weak queries can't be attributed to a radar, so they are hidden by `-r` only when they were attributed to a different radar.
+```
+    -36.42 ms  setAlt/2        -9.1 ███████████████████████████████████████████
+    -12.51 ms  S                2.5 ███████████████████████████████████████████████████████████
+    +47.23 ms  AA             -20.1 ▒▒▒▒▒
+  +1790.98 ms  C              -15.9 ░░░░░░░░░░░░░░░░░░░
+```
+
+- **Each row:** time relative to the middle of the beam pass, query token and target number (as in the burst sequence), amplitude in dBFS, and a bar whose length is the amplitude.
+- **Bar character:**
+  - `█` in-beam query
+  - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
+  - `▒` other weak query that is not SLS
+- **Time range:**
+  - Sidelobes are shown from half a rotation before the pass to half a rotation after. Before the rotation is known, ±2 s is used.
+  - Weak queries are shown only within one dwell time (30–200 ms).
+  - Rows keep being added as late sidelobes arrive.
+- **Scrolling:** ↑/↓ (or `j`/`k`), PgUp/PgDn, Home/End. A new burst opens just before its first beam query. `b` returns to the dashboard.
+- **Filters:** the type and aircraft filters apply. Sidelobe and weak queries are hidden by `-r` only when they were attributed to a different radar.
 
 ## TCAS / ACAS
 
