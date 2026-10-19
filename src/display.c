@@ -52,6 +52,22 @@ static int term_rows(void)
     return 50;
 }
 
+/* bottom line: filter input, last command result, or key help */
+static void draw_status_line(const struct run_info *ri)
+{
+    if (ri->cmd_mode)
+        printf(B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R EL,
+               ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
+    else if (ri->cmd_msg[0])
+        printf(YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  b graph  x reset" R EL,
+               ri->cmd_msg);
+    else if (ri->graph)
+        printf(DIM "keys: b dashboard  \u2191\u2193 PgUp PgDn Home End scroll  r radar filter  a aircraft filter  "
+               "S Mode S only  R roll-calls only  q quit" R EL);
+    else printf(DIM "keys: q quit  +/- VGA  L/l LNA  p RF amp (manual)  g auto gain  r radar filter  a aircraft filter  "
+                "S Mode S only  R roll-calls only  b burst graph  x reset stats" R EL);
+}
+
 /* ---------- burst graph screen ('b') ----------
  * One row per query, in time order: time relative to the middle of the beam
  * pass, query/target, amplitude and a horizontal bar whose length is the
@@ -243,7 +259,10 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     bool weak = !clipping && span > 0.8 * win && peak_w - st.noise_dbfs < 25;
 
     if (ri->graph) {
-        draw_graph(cols, term_rows());
+        int rows = term_rows();
+        draw_graph(cols, rows - 1);           /* last row: status / filter input */
+        printf("\033[%d;1H", rows);
+        draw_status_line(ri);
         fputs("\033[J", stdout);
         fflush(stdout);
         return;
@@ -420,14 +439,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         if ((int)strlen(buf) > cols - 1) buf[cols - 1] = 0;
         printf("%s" EL, buf);
     }
-    if (ri->cmd_mode)
-        printf(B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R EL,
-               ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
-    else if (ri->cmd_msg[0])
-        printf(YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  x reset" R EL,
-               ri->cmd_msg);
-    else printf(DIM "keys: q quit  +/- VGA  L/l LNA  p RF amp (manual)  g auto gain  r radar filter  a aircraft filter  "
-                "S Mode S only  R roll-calls only  b burst graph  x reset stats" R EL);
+    draw_status_line(ri);
     fputs("\033[J", stdout);
     fflush(stdout);
 }
