@@ -380,24 +380,6 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
                  X->nbursts ? (double)X->total_sum / X->nbursts : 0);
     }
     if (AS.nradars == 0) snprintf(right[nr++], 160, DIM "(waiting for a main-beam burst)" R);
-    nr++; right[nr - 1][0] = 0;
-    {
-        char line[160]; int o = 0;
-        o += snprintf(line, sizeof(line), B "UF11 codes" R);
-        for (int si = 0; si < 2; si++)
-            for (int c = 0; c < 64; c++)
-                for (int p = 0; p < 16; p++)
-                    if (AS.uf11_code[si][c][p] && o < 150)
-                        o += snprintf(line + o, sizeof(line) - o, " %s%d/PR%d:%ld", si ? "SI" : "II", c, p,
-                                      AS.uf11_code[si][c][p]);
-        snprintf(right[nr++], 160, "%s", line);
-        o = snprintf(line, sizeof(line), B "DI" R);
-        for (int k = 0; k < 8; k++) if (AS.di[k]) o += snprintf(line + o, sizeof(line) - o, " %d:%ld", k, AS.di[k]);
-        o += snprintf(line + o, sizeof(line) - o, "  " B "PC" R);
-        for (int k = 0; k < 8; k++) if (AS.pc[k]) o += snprintf(line + o, sizeof(line) - o, " %d:%ld", k, AS.pc[k]);
-        snprintf(right[nr++], 160, "%s", line);
-        snprintf(right[nr++], 160, B "Roll-called aircraft" R " %d", AS.naddr_radar);
-    }
     int rows = nl > nr ? nl : nr;
     if (nm > rows) rows = nm;
     for (int i = 0; i < rows; i++) {
