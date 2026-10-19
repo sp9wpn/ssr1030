@@ -37,13 +37,12 @@ static struct {
     double lol_lat, lol_lon;
     int lol_radius;
     bool agc;
-    int adsb_boost;
     struct analysis_cfg acfg;
 } opt = {
     .freq = 1030e6, .fs = 16e6, .lna = 32, .vga = 24, .amp = 0,
     .thr_db = 12, .dens_max = 50, .sep = ',',
     .adsb_every = 30, .adsb_dwell = 2.0, .lol_radius = 150,
-    .agc = true, .adsb_boost = 12,
+    .agc = true,
     .acfg = { .burst_gap = 0.030, .burst_min = 3, .member_db = 3, .core_db = 6,
               .radar_sel = -1, .ac_addr = -1 },
 };
@@ -203,18 +202,6 @@ static void agc_idle(hackrf_device *dev, double since_burst, double rot)
     win_peak = -99;
 }
 
-/* after an ADS-B window: aim decoded frame peaks at about -8 dBFS */
-static void adsb_agc(void)
-{
-    struct adsb_stats as;
-    adsb_get_stats(&as);
-    bool clip = as.win_samples && (double)as.win_clip / as.win_samples > 1e-5;
-    if (clip || as.win_peak_db > -3) opt.adsb_boost -= 4;
-    else if (as.win_frames == 0 || as.win_peak_db < -20) opt.adsb_boost += 4;
-    if (opt.adsb_boost < 0) opt.adsb_boost = 0;
-    if (opt.adsb_boost > 36) opt.adsb_boost = 36;
-}
-
 static void set_mark(hackrf_device *dev, bool to1090)
 {
     hackrf_set_freq(dev, (uint64_t)(to1090 ? ADSB_FREQ : opt.freq));
@@ -360,7 +347,6 @@ static void usage(void)
 "ADS-B callsigns (1090 MHz, HackRF retunes for short windows):\n"
 "  -B, --adsb             listen on 1090 periodically to map addresses to callsigns\n"
 "      --adsb-every S     minimum time between windows (default 30)\n"
-"      --adsb-boost DB    extra gain during ADS-B windows (default 12, adapts per window)\n"
 "      --adsb-dwell S     window length (default 2.0); windows are placed right after a\n"
 "                         main-beam burst when the rotation is known, so no burst is lost\n"
 "      --adsb-db PATH     load/save the address-callsign table (works with --file too)\n"
@@ -416,7 +402,7 @@ int main(int argc, char **argv)
         { "rollcall-only", 0, 0, 'R' },
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
-        { "no-auto-gain", 0, 0, 17 }, { "adsb-boost", 1, 0, 18 },
+        { "no-auto-gain", 0, 0, 17 },
         { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
     };
     int c;
@@ -467,7 +453,6 @@ int main(int argc, char **argv)
             break;
         case 16: opt.lol_radius = atoi(optarg); break;
         case 17: opt.agc = false; break;
-        case 18: opt.adsb_boost = atoi(optarg); break;
         default: usage(); return c == 'h' ? 0 : 1;
         }
     }
@@ -638,7 +623,6 @@ int main(int argc, char **argv)
                     }
                     if (-wait > 3 * rot + 10) go = true;              /* never starve the table */
                     if (go) {
-                        hw_gain(dev, gain_from_total(gain_total(cur_gain) + opt.adsb_boost));
                         set_mark(dev, true);
                         adsb_active = true;
                         adsb_pos = captured();
@@ -647,8 +631,7 @@ int main(int argc, char **argv)
             } else if (captured() - adsb_pos >= (uint64_t)((opt.adsb_dwell + GUARD_S) * opt.fs) * 2) {
                 set_mark(dev, false);
                 adsb_active = false;
-                hw_gain(dev, cur_gain);
-                adsb_agc();
+                hw_gain(dev, cur_gain);       /* apply a gain change deferred during the window */
                 adsb_last_end = captured() / 2.0 / opt.fs;
                 if (opt.adsb_db) cs_save(opt.adsb_db);
             }
@@ -661,7 +644,7 @@ int main(int argc, char **argv)
             last_draw = ts;
             if (tio_raw) handle_keys(dev);
             ri.lna = opt.lna; ri.vga = opt.vga; ri.amp = opt.amp;
-            ri.agc = opt.agc; ri.adsb_boost = opt.adsb_boost;
+            ri.agc = opt.agc;
             ri.gain_age = gain_change_t >= 0 ? now - gain_change_t : -1;
             ri.gain_delta = gain_delta;
             snprintf(ri.gain_why, sizeof(ri.gain_why), "%s", gain_why);
@@ -693,9 +676,9 @@ int main(int argc, char **argv)
                 ri.hw, opt.freq / 1e6, opt.fs / 1e6, ri.bbw / 1e6, opt.amp ? "on" : "off", opt.lna, opt.vga,
                 (opt.amp ? 11 : 0) + opt.lna + opt.vga, "");
     if (live)
-        fprintf(sf, "  gain: %s, %d changes during the run%s%s%s; ADS-B window boost +%d dB\n",
+        fprintf(sf, "  gain: %s, %d changes during the run%s%s%s\n",
                 opt.agc ? "automatic" : "manual", gain_changes, gain_changes ? " (last: " : "",
-                gain_changes ? gain_why : "", gain_changes ? ")" : "", opt.adsb_boost);
+                gain_changes ? gain_why : "", gain_changes ? ")" : "");
     fprintf(sf, "\nnoise %.1f dBFS, threshold %.1f dBFS, %lu pulses, %lu unmatched, %lu interference-rejected, "
                 "clipped samples %.4f%%, USB drops %lu\n",
             st.noise_dbfs, st.thr_dbfs, (unsigned long)st.pulses, (unsigned long)st.stray_pulses,

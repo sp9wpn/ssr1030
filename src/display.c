@@ -138,7 +138,6 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         printf("HackRF: %s  " B "AMP %s  LNA %d dB  VGA %d dB" R "  (nominal %d dB)  %s%s" R,
                ri->hw, ri->amp ? "on" : "off", ri->lna, ri->vga, (ri->amp ? 11 : 0) + ri->lna + ri->vga,
                ri->agc ? GRN "AUTO GAIN" : YEL "MANUAL GAIN ('g' = auto)", "");
-        if (ri->adsb) printf("  ADS-B +%d dB", ri->adsb_boost);
         if (ri->gain_age >= 0)
             printf(DIM "  last change %+d dB %.0f s ago (%s)" R, ri->gain_delta, ri->gain_age, ri->gain_why);
         fputs(EL, stdout);

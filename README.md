@@ -76,10 +76,9 @@ Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coi
 - **Manual override:** pressing `+ - L l a` switches to manual gain.
 - **Starting point:** `-a/-l/-g` set the starting gain. The default is amp off, LNA 32, VGA 24.
 
-**ADS-B windows** run with extra gain (`--adsb-boost`, default +12 dB), because 1090 replies are usually weaker than the interrogations.
-The boost adapts after each window: clipping or frames above −3 dBFS lower it by 4 dB, and frames below −20 dBFS (or none at all) raise it by 4 dB.
+ADS-B windows use the same gain as 1030.
 
-The dashboard shows the HackRF settings, the mode (AUTO/MANUAL), the ADS-B boost and the last gain change with its reason.
+The dashboard shows the HackRF settings, the mode (AUTO/MANUAL) and the last gain change with its reason.
 The level check covers the last max(20 s, 3 rotations) and reports clipping, a weak signal (strongest pulse < 25 dB above noise), or OK.
 
 Because the gain changes, `amp_dbfs` alone is not comparable over time.

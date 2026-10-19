@@ -129,9 +129,6 @@ int64_t analysis_target_addr(void);         /* resolved --aircraft address, -1 n
 struct adsb_stats {
     long windows, frames, df17, df11, idents, commb_idents;
     double seconds;
-    /* current / last window */
-    long win_frames, win_clip, win_samples;
-    float win_peak_db;     /* strongest decoded frame, dBFS */
 };
 void adsb_init(double fs);
 void adsb_window_start(void);
@@ -160,7 +157,6 @@ struct run_info {
     double adsb_next;      /* seconds until the next window (approx.), <0 waiting for burst */
     char filters[160];
     bool agc;              /* automatic gain */
-    int adsb_boost;        /* extra gain in ADS-B windows, dB */
     double gain_age;       /* seconds since the last gain change, <0 never */
     int gain_delta;        /* last change, dB */
     char gain_why[64];
