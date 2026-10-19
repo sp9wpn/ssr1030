@@ -342,12 +342,15 @@ int analysis_top_transitions(struct trans *out, int max)
     return n;
 }
 
+static void graph_note(const struct interrog *y);
+
 /* returns true when the interrogation passed the filters */
 static bool stage2(struct interrog *x, int burst_code)
 {
     AS.n_all++;
     resolve_target();
     attribute(x, burst_code);
+    graph_note(x);
 
     if (x->tcas) {
         AS.tcas_total++;
@@ -412,7 +415,7 @@ static bool is_core(const struct interrog *x)
     return is_member(x) && x->amp_db >= AS.bg_db + AS.cfg.core_db;
 }
 
-static void rec_add(struct burst *b, const struct interrog *x)
+static int rec_add(struct burst *b, const struct interrog *x)
 {
     if (b->n == 0) { b->t0 = x->t; b->peak = -99; }
     b->n++;
@@ -430,6 +433,91 @@ static void rec_add(struct burst *b, const struct interrog *x)
         }
     }
     if (b->nks < SEQ_MAX) { b->ks[b->nks] = tok; b->ka[b->nks] = (uint8_t)k; b->nks++; }
+    return k;
+}
+
+/* non-member queries shown in the burst graph: same type/aircraft filters,
+ * radar filter only when the query could be attributed */
+static bool graph_extra_ok(const struct interrog *y)
+{
+    if (y->tcas) return false;
+    if (AS.cfg.radar_sel >= 0 && y->radar >= 0 && y->radar != AS.cfg.radar_sel) return false;
+    if (AS.cfg.modes_only && !kind_is_modes(y->kind)) return false;
+    if (AS.cfg.rollcall_only && !directed(y->kind)) return false;
+    if (aircraft_filter_on() && !to_target(y)) return false;
+    return true;
+}
+
+static void graph_add(struct burst *b, const struct interrog *y, double t0, int cls, int ka)
+{
+    if (b->ngp >= SEQ_MAX) return;
+    struct gpoint *g = &b->gp[b->ngp++];
+    g->dt = (float)((y->t - t0) * 1e3);
+    g->amp = y->amp_db;
+    g->tok = seq_token(y);
+    g->ka = (uint8_t)ka;
+    g->cls = (uint8_t)cls;
+    if (cls == GP_SIDE) b->nside++;
+    if (cls == GP_WEAK) b->nweak++;
+}
+
+/* recent non-beam queries (sidelobe / weak), so the graph can show the
+ * time around a burst; queries after the commit are appended to it */
+#define GRING 1024
+static struct { double t; float amp; uint16_t tok; uint8_t cls; } gring[GRING];
+static uint64_t gring_n;
+static int post_idx = -1;              /* AS.hist slot receiving late queries */
+static double post_t0, post_until;
+
+static void graph_note(const struct interrog *y)
+{
+    if (y->burst >= 0 || !graph_extra_ok(y)) return;
+    int cls = y->sidelobe ? GP_SIDE : GP_WEAK;
+    if (post_idx >= 0 && y->t <= post_until) {
+        struct burst *b = &AS.hist[post_idx % BURST_HIST];
+        if (b->ngp < SEQ_MAX) {
+            struct gpoint *g = &b->gp[b->ngp++];
+            g->dt = (float)((y->t - post_t0) * 1e3);
+            g->amp = y->amp_db; g->tok = seq_token(y); g->ka = NO_TARGET; g->cls = (uint8_t)cls;
+            if (cls == GP_SIDE) b->nside++; else b->nweak++;
+        }
+        return;
+    }
+    int i = gring_n++ % GRING;
+    gring[i].t = y->t; gring[i].amp = y->amp_db; gring[i].tok = seq_token(y); gring[i].cls = (uint8_t)cls;
+}
+
+static int cmp_gp(const void *x, const void *y)
+{
+    float a = ((const struct gpoint *)x)->dt, b = ((const struct gpoint *)y)->dt;
+    return (a > b) - (a < b);
+}
+
+/* before commit: add buffered non-beam queries within margin of the burst */
+static void graph_context(struct burst *b, double t0, double t1, double margin)
+{
+    uint64_t first = gring_n > GRING ? gring_n - GRING : 0;
+    for (uint64_t k = first; k < gring_n; k++) {
+        int i = k % GRING;
+        if (gring[i].t < t0 - margin || gring[i].t > t1 + margin || b->ngp >= SEQ_MAX) continue;
+        struct gpoint *g = &b->gp[b->ngp++];
+        g->dt = (float)((gring[i].t - t0) * 1e3);
+        g->amp = gring[i].amp; g->tok = gring[i].tok; g->ka = NO_TARGET; g->cls = gring[i].cls;
+        if (g->cls == GP_SIDE) b->nside++; else b->nweak++;
+    }
+    qsort(b->gp, b->ngp, sizeof(b->gp[0]), cmp_gp);
+}
+
+const struct burst *analysis_graph_burst(void)
+{
+    if (!AS.nhist) return NULL;
+    int code = analysis_main_code();
+    int lim = AS.nhist < BURST_HIST ? AS.nhist : BURST_HIST;
+    for (int i = 0; i < lim; i++) {
+        const struct burst *b = &AS.hist[(AS.nhist - 1 - i) % BURST_HIST];
+        if (b->code == code) return b;
+    }
+    return &AS.hist[(AS.nhist - 1) % BURST_HIST];
 }
 
 static void commit(struct burst *b)
@@ -514,14 +602,18 @@ void burst_targets(const struct burst *b, const int *rank, char *out, size_t n)
 
 /* drain the output queue through stage 2; members of burst `id` are
  * collected into rec when valid */
-static void drain(int id, int code, bool valid, struct burst *rec)
+static void drain(int id, int code, bool valid, struct burst *rec, double t0)
 {
     while (ot < oh) {
         struct interrog *y = &outq[ot++ % OUTQ];
         bool member = id >= 0 && y->burst == id;
         if (member && !valid) y->burst = -1;
         bool pass = stage2(y, member && valid ? code : -1);
-        if (pass && member && valid) rec_add(rec, y);
+        if (!valid || !rec) continue;
+        if (pass && member) {
+            int ka = rec_add(rec, y);
+            graph_add(rec, y, t0, GP_BEAM, ka);
+        }
     }
 }
 
@@ -539,9 +631,18 @@ static void close_burst(void)
     rec.id = o->id;
     rec.code = code;
     rec.partial = o->partial;
-    drain(o->id, code, valid, &rec);
+    drain(o->id, code, valid, &rec, o->t0);
     if (valid && (AS.cfg.radar_sel < 0 || code == AS.cfg.radar_sel)) AS.last_burst_end = o->t1;
-    if (valid && rec.n > 0) commit(&rec);
+    if (valid && rec.n > 0) {
+        double margin = o->t1 - o->t0;
+        if (margin < 0.03) margin = 0.03;
+        if (margin > 0.2) margin = 0.2;
+        graph_context(&rec, o->t0, o->t1, margin);
+        commit(&rec);
+        post_idx = AS.nhist - 1;
+        post_t0 = o->t0;
+        post_until = o->t1 + margin;
+    }
 }
 
 static void open_burst(const struct interrog *x)
@@ -588,7 +689,7 @@ static void stage1(struct interrog *x, uint64_t idx)
         outq[oh++ % OUTQ] = *x;
         if (oh - ot >= OUTQ - 1) close_burst();
     } else {
-        drain(-1, -1, false, NULL);
+        drain(-1, -1, false, NULL, 0);
         stage2(x, -1);
     }
 }
@@ -601,14 +702,14 @@ void analysis_tick(double now)
         stage1(&pend[idx % PENDING], idx);
     }
     if (AS.ob.open && now - LOOKAHEAD - AS.ob.t1 > AS.cfg.burst_gap) close_burst();
-    if (now >= 1e299) { close_burst(); drain(-1, -1, false, NULL); }
+    if (now >= 1e299) { close_burst(); drain(-1, -1, false, NULL, 0); }
 }
 
 void analysis_gap(double t0, double t1)
 {
     analysis_tick(t0 + LOOKAHEAD + 1e-6);
     if (AS.ob.open) { AS.ob.partial = true; close_burst(); }
-    drain(-1, -1, false, NULL);
+    drain(-1, -1, false, NULL, 0);
     for (int r = 0; r < AS.nradars; r++) AS.radars[r].gap_since = true;
     AS.gap_end = t1;
 }

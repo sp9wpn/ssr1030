@@ -45,6 +45,114 @@ static int term_cols(void)
     return 120;
 }
 
+static int term_rows(void)
+{
+    struct winsize w;
+    if (ioctl(1, TIOCGWINSZ, &w) == 0 && w.ws_row > 20) return w.ws_row;
+    return 50;
+}
+
+/* ---------- burst graph screen ('b') ----------
+ * Top: amplitude (y, dBFS) against time from the first query (x, ms); one
+ * vertical bar per query, strongest wins a shared column, beam over sidelobe
+ * over weak at equal height. Bottom: every query as dt / token / amplitude. */
+static const char *gp_char(int cls) { return cls == GP_BEAM ? "\u2588" : cls == GP_SIDE ? "\u2591" : "\u2592"; }
+static const char *gp_color(int cls) { return cls == GP_BEAM ? GRN : cls == GP_SIDE ? YEL : DIM; }
+
+static void draw_graph(int cols, int rows)
+{
+    const struct burst *b = analysis_graph_burst();
+    if (!b) {
+        printf(EL B "Burst graph" R DIM "  - waiting for a main-beam burst   ('b' back to dashboard)" R EL);
+        return;
+    }
+    int ngp = b->ngp;
+    float tmin = 1e9, tmax = -1e9, amax = -99, amin = 99;
+    for (int i = 0; i < ngp; i++) {
+        const struct gpoint *g = &b->gp[i];
+        if (g->dt < tmin) tmin = g->dt;
+        if (g->dt > tmax) tmax = g->dt;
+        if (g->amp > amax) amax = g->amp;
+        if (g->amp < amin) amin = g->amp;
+    }
+    float span = tmax - tmin;
+    if (span < 1) span = 1;
+    float ytop = ceilf((amax + 1) / 2) * 2, ybot = floorf((amin - 1) / 2) * 2;
+    if (ytop - ybot < 12) ybot = ytop - 12;
+
+    int rank[64];
+    burst_ranks(b, rank);
+    char tl[1024];
+    burst_targets(b, rank, tl, sizeof(tl));
+    printf(B "Burst #%d %s%s" R "  t=%.3f s  dur %.1f ms  peak %.1f dBFS  gain %.0f dB  " GRN "%s" R " beam %d  "
+           YEL "%s" R " sidelobe %d  " DIM "%s" R " weak %d   " DIM "('b' back to dashboard)" R EL,
+           b->id, b->key, b->partial ? "*" : "", b->t0, 1e3 * (b->t1 - b->t0), b->peak, b->gain,
+           gp_char(GP_BEAM), b->n, gp_char(GP_SIDE), b->nside, gp_char(GP_WEAK), b->nweak);
+    if (b->naddr) printf("  targets: %.*s" EL, cols - 14, tl);
+    else fputs(EL, stdout);
+
+    /* chart */
+    int W = cols - 10;
+    if (W < 20) W = 20;
+    int H = rows / 2 - 6;
+    if (H > 24) H = 24;
+    if (H < 8) H = 8;
+    static float colamp[3][1024];
+    if (W > 1024) W = 1024;
+    for (int c = 0; c < 3; c++) for (int x = 0; x < W; x++) colamp[c][x] = -999;
+    for (int i = 0; i < ngp; i++) {
+        const struct gpoint *g = &b->gp[i];
+        int x = (int)lroundf((g->dt - tmin) / span * (W - 1));
+        if (g->amp > colamp[g->cls - 1][x]) colamp[g->cls - 1][x] = g->amp;
+    }
+    for (int r = 0; r < H; r++) {
+        float lvl = ytop - (ytop - ybot) * (r + 0.5f) / H;
+        if (r % 4 == 0) printf("%6.1f \u2524", ytop - (ytop - ybot) * r / H);
+        else printf("       \u2502");
+        int cur = -1;
+        for (int x = 0; x < W; x++) {
+            int cls = 0;
+            for (int c = 0; c < 3 && !cls; c++) if (colamp[c][x] >= lvl) cls = c + 1;
+            if (cls != cur) { fputs(R, stdout); if (cls) fputs(gp_color(cls), stdout); cur = cls; }
+            fputs(cls ? gp_char(cls) : " ", stdout);
+        }
+        fputs(R EL, stdout);
+    }
+    printf("%6.1f \u2514", ybot);
+    for (int x = 0; x < W; x++) fputs(x % 10 == 0 ? "\u252c" : "\u2500", stdout);
+    fputs(EL "        ", stdout);
+    for (int x = 0; x < W; x += 10) {
+        char lab[16];
+        snprintf(lab, sizeof(lab), "%.1f", span * x / (W - 1));
+        printf("%-10s", lab);
+    }
+    printf(EL DIM "        ms after first query (dBFS on the left)" R EL);
+
+    /* query list, column-major in time order */
+    int used = 3 + (b->naddr ? 0 : 0) + H + 3 + 2;
+    int lrows = rows - used - 1;
+    if (lrows < 3) lrows = 3;
+    int cw = 30, ncol = (cols - 1) / cw;
+    if (ncol < 1) ncol = 1;
+    printf(B "%d queries" R DIM "  (ms  query/target  dBFS)" R EL, ngp);
+    int shown = lrows * ncol < ngp ? lrows * ncol : ngp;
+    int nr = (shown + ncol - 1) / ncol;
+    for (int r = 0; r < nr; r++) {
+        for (int c = 0; c < ncol; c++) {
+            int i = c * nr + r;
+            if (i >= shown) break;
+            const struct gpoint *g = &b->gp[i];
+            char ts[24], tok[32];
+            seq_token_str(g->tok, ts, sizeof(ts));
+            if (g->ka != NO_TARGET) snprintf(tok, sizeof(tok), "%s/%d", ts, rank[g->ka]);
+            else snprintf(tok, sizeof(tok), "%s", ts);
+            printf("%s%s" R " %7.2f %-13s %6.1f   ", gp_color(g->cls), gp_char(g->cls), g->dt - tmin, tok, g->amp);
+        }
+        fputs(EL, stdout);
+    }
+    if (shown < ngp) printf(DIM "  ... %d more (enlarge the terminal)" R EL, ngp - shown);
+}
+
 static void print_seq(const struct burst *b, int cols, int maxlines)
 {
     int col = 2, lines = 0, rank[64];
@@ -133,6 +241,13 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     double clip_w_pct = samp_w ? 100.0 * clip_w / samp_w : 0;
     bool clipping = now - last_clip_t < win;
     bool weak = !clipping && span > 0.8 * win && peak_w - st.noise_dbfs < 25;
+
+    if (ri->graph) {
+        draw_graph(cols, term_rows());
+        fputs("\033[J", stdout);
+        fflush(stdout);
+        return;
+    }
 
     if (ri->live) {
         printf("HackRF: %s  " B "AMP %s  LNA %d dB  VGA %d dB" R "  (nominal %d dB)  %s%s" R,
@@ -312,7 +427,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         printf(YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  x reset" R EL,
                ri->cmd_msg);
     else printf(DIM "keys: q quit  +/- VGA  L/l LNA  p RF amp (manual)  g auto gain  r radar filter  a aircraft filter  "
-                "S Mode S only  R roll-calls only  x reset stats" R EL);
+                "S Mode S only  R roll-calls only  b burst graph  x reset stats" R EL);
     fputs("\033[J", stdout);
     fflush(stdout);
 }

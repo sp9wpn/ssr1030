@@ -161,6 +161,7 @@ struct run_info {
     double adsb_next;      /* seconds until the next window (approx.), <0 waiting for burst */
     char filters[256];
     bool agc;              /* automatic gain */
+    bool graph;            /* burst graph screen instead of the dashboard */
     bool cmd_mode;         /* filter input line open */
     char cmd_kind;         /* 'r' radar or 'a' aircraft */
     char cmd[160];

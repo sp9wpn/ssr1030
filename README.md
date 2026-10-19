@@ -75,6 +75,7 @@ Dashboard keys:
 | `a` | Aircraft filter: type hex addresses or callsigns (list separated by commas or spaces), then `Enter` |
 | `S` | Mode S only on/off (same as `-S`) |
 | `R` | Roll-calls only on/off (same as `-R`) |
+| `b` | Burst graph screen on/off (see below) |
 | `x` | Reset statistics |
 
 - **Manual gain:** `+ - L l p` switch the gain to manual.
@@ -136,6 +137,18 @@ This was checked on air: UF11 and UF16 broadcasts decode to `FFFFFF`, and roll-c
 ### Bit timing
 
 Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1.2.1.5.2.3), not at sync + 0.25 µs.
+
+## Burst graph (`b`)
+
+`b` switches the whole screen to the latest beam pass of the main radar. Press `b` again to return.
+
+- **Chart:** amplitude (dBFS, y) against time from the first query (ms, x), with one vertical bar per query. The antenna beam shape shows directly.
+  - `█` in-beam query (green)
+  - `░` sidelobe query (yellow): SLS, meaning P2 ≥ P1 or Mode S without sync
+  - `▒` other weak query (dim): below the beam threshold, not SLS
+- **Context:** the chart also covers one dwell time (30–200 ms) before and after the pass, so sidelobes and beam edges around it are visible.
+- **Below the chart:** every query, with time (ms), query token and target number (as in the burst sequence) and amplitude.
+- **Filters:** the type and aircraft filters apply. Sidelobe and weak queries can't be attributed to a radar, so they are hidden by `-r` only when they were attributed to a different radar.
 
 ## TCAS / ACAS
 

@@ -17,6 +17,16 @@
 enum group { G_AC, G_ACONLY, G_ACS, G_SALL, G_SALT, G_SSQK, G_CAL, G_SETALT, G_TRK, G_HDGSPD, G_OBDS,
              G_MSG, G_SOTHER, G_COUNT };
 
+/* one query in the burst graph */
+struct gpoint {
+    float dt;               /* ms after the burst's first member */
+    float amp;              /* dBFS */
+    uint16_t tok;           /* seq_token */
+    uint8_t ka;             /* target index, NO_TARGET when none */
+    uint8_t cls;            /* GP_BEAM, GP_SIDE, GP_WEAK */
+};
+enum { GP_BEAM = 1, GP_SIDE = 2, GP_WEAK = 3 };
+
 /* a committed burst, built from the interrogations that passed the filters */
 struct burst {
     int id;
@@ -35,6 +45,8 @@ struct burst {
     uint32_t addrs[64];
     double period;          /* time since previous burst of the same radar */
     float gain;             /* nominal receiver gain at commit */
+    struct gpoint gp[SEQ_MAX];  /* every query in the burst's time span, incl. sidelobes */
+    int ngp, nside, nweak;
 };
 
 /* burst detector state (all interrogations, before filtering) */
@@ -119,5 +131,6 @@ int analysis_top_transitions(struct trans *out, int max);
 void burst_ranks(const struct burst *b, int *rank);          /* alphabetical target numbers, 1-based */
 int burst_item(const struct burst *b, int s, const int *rank, char *out, size_t n);  /* run at s -> next */
 void burst_targets(const struct burst *b, const int *rank, char *out, size_t n);   /* "1/DLH123 2/..." */
+const struct burst *analysis_graph_burst(void);   /* latest burst of the main radar, else latest */
 
 #endif

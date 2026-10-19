@@ -324,6 +324,7 @@ static void build_filters(char *buf, size_t n)
 }
 
 /* ---------- filter input line ('r' radar, 'a' aircraft; empty clears) ---------- */
+static bool show_graph;               /* 'b': burst graph screen */
 static char edit_kind;                /* 'r', 'a' or 0 when not editing */
 static char cmd_buf[160];
 static int cmd_len;
@@ -444,6 +445,7 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             apply_filters(ri, opt.acfg.rollcall_only ? "roll-calls only ON (all-calls dropped)" : "roll-calls only OFF");
             manual = false;
             break;
+        case 'b': case 'B': show_graph = !show_graph; manual = false; break;
         case 'x': case 'X':
             analysis_init(&opt.acfg);
             analysis_set_gain(gain_total(cur_gain));
@@ -457,6 +459,7 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             set_gain(dev, g, "manual");
         }
     }
+    ri->graph = show_graph;
     ri->cmd_mode = edit_kind != 0;
     ri->cmd_kind = edit_kind;
     snprintf(ri->cmd, sizeof(ri->cmd), "%.*s", cmd_len, cmd_buf);
@@ -517,7 +520,7 @@ static void usage(void)
 "  -q, --quiet            no live output; summary at exit\n\n"
 "Keys (dashboard): q quit, +/- VGA, L/l LNA, p RF amp (any of these: manual gain), g auto gain,\n"
 "                  r radar filter, a aircraft filter (type it, Enter; empty clears),\n"
-"                  S Mode S only on/off, R roll-calls only on/off, x reset statistics\n");
+"                  S Mode S only on/off, R roll-calls only on/off, b burst graph, x reset statistics\n");
 }
 
 int main(int argc, char **argv)
