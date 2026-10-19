@@ -24,6 +24,7 @@ make
 ./ssr1030 -r SI17                  # only radar SI17
 ./ssr1030 -r SI17 -S               # only radar SI17, Mode S interrogations only
 ./ssr1030 -B                       # learn callsigns from ADS-B (1090) windows (kept in memory)
+./ssr1030 -r SI17 -R               # only roll-calls of SI17 (no all-calls)
 ./ssr1030 -A 48AF01                # only interrogations addressed to one aircraft
 ./ssr1030 -A LOT3KM -B             # same, by callsign
 ./ssr1030 --adsblol 52.23,21.01    # preload callsigns of aircraft within 150 NM from adsb.lol
@@ -38,7 +39,8 @@ These apply to statistics, bursts, the log and `--list`. TCAS stays a separate s
   - A/C and all-call interrogations are attributed through the main-beam burst they belong to. A burst gets the majority code of the interrogations inside it.
   - Outside bursts, an all-call is attributed if a UF11 was sent less than 300 µs before it.
   - Anything left unattributed is dropped.
-- `-S, --modes-only`: drops Mode 1/2/A/B/C/D and intermode (A/C-only and A/C/S all-calls).
+- `-S, --modes-only`: drops plain Mode A/C and intermode (A/C-only and A/C/S all-calls).
+- `-R, --rollcall-only`: keeps only interrogations addressed to an aircraft (UF4/5/20/21/24/19). It drops UF11 `S`, all intermode all-calls and plain Mode A/C.
 - `-A, --aircraft ID`: keeps only interrogations addressed to one aircraft (UF0/4/5/16/19/20/21/24).
   - `ID` is 6 hex digits or a callsign. Use `cs:` to force a callsign that looks like hex.
   - A callsign resolves once the ADS-B table knows it.

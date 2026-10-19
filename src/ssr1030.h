@@ -105,6 +105,7 @@ struct analysis_cfg {
     /* filters */
     int radar_sel;         /* radar code to keep, -1 = all */
     bool modes_only;       /* drop Mode A/C and intermode interrogations */
+    bool rollcall_only;    /* keep only interrogations addressed to an aircraft */
     int64_t ac_addr;       /* aircraft address to keep, -1 = all */
     char ac_callsign[9];   /* or callsign, resolved through the ADS-B table */
 };

@@ -80,7 +80,7 @@ struct analysis_state {
     long total[K_COUNT], inbeam[K_COUNT], side[K_COUNT];
     long tcas_total, tcas_uf0, tcas_uf16, tcas_ws;
     long n_all, n_pass;
-    long filt_radar, filt_modes, filt_aircraft;
+    long filt_radar, filt_modes, filt_rollcall, filt_aircraft;
 
     struct open_burst ob;
     struct burst hist[BURST_HIST];

@@ -202,6 +202,7 @@ static bool passes(const struct interrog *x)
 {
     if (AS.cfg.radar_sel >= 0 && x->radar != AS.cfg.radar_sel) { AS.filt_radar++; return false; }
     if (AS.cfg.modes_only && !kind_is_modes(x->kind)) { AS.filt_modes++; return false; }
+    if (AS.cfg.rollcall_only && !directed(x->kind)) { AS.filt_rollcall++; return false; }
     if (aircraft_filter_on() && !to_target(x)) { AS.filt_aircraft++; return false; }
     return true;
 }
@@ -503,9 +504,9 @@ void analysis_print_summary(FILE *f)
 {
     fprintf(f, "\n=== ssr1030 summary: %.1f s analysed, %ld interrogations, %ld passed filters ===\n",
             AS.now, AS.n_all, AS.n_pass);
-    if (AS.filt_radar || AS.filt_modes || AS.filt_aircraft)
-        fprintf(f, "filtered out: other/unknown radar %ld, non-Mode S %ld, other aircraft %ld\n",
-                AS.filt_radar, AS.filt_modes, AS.filt_aircraft);
+    if (AS.filt_radar || AS.filt_modes || AS.filt_rollcall || AS.filt_aircraft)
+        fprintf(f, "filtered out: other/unknown radar %ld, non-Mode S %ld, all-call/unaddressed %ld, other aircraft %ld\n",
+                AS.filt_radar, AS.filt_modes, AS.filt_rollcall, AS.filt_aircraft);
     if (aircraft_filter_on()) {
         if (AS.target >= 0) fprintf(f, "aircraft filter: %06llX %s\n", (unsigned long long)AS.target,
                                     cs_lookup((uint32_t)AS.target) ? cs_lookup((uint32_t)AS.target) : "");

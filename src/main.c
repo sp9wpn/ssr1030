@@ -217,6 +217,8 @@ static void usage(void)
 "  -r, --radar CODE       keep only one radar, e.g. SI17 or II3; A/C interrogations are\n"
 "                         attributed via the beam burst or the preceding UF11, else dropped\n"
 "  -S, --modes-only       drop Mode A/C and intermode (A/C-only, A/C/S all-call) interrogations\n"
+"  -R, --rollcall-only    keep only interrogations addressed to an aircraft (UF4/5/20/21/24/19):\n"
+"                         drops UF11 and A/C/intermode all-calls and plain Mode A/C\n"
 "  -A, --aircraft ID      keep only interrogations addressed to one aircraft: 6 hex digits\n"
 "                         (48AF01) or a callsign (LOT3KM; needs --adsb or --adsb-db).\n"
 "                         Prefix with cs: to force a callsign that looks like hex\n\n"
@@ -274,12 +276,13 @@ int main(int argc, char **argv)
         { "member-db", 1, 0, 8 }, { "core-db", 1, 0, 9 }, { "log", 1, 0, 'o' }, { "space", 0, 0, 10 },
         { "list", 0, 0, 'L' }, { "tcas", 0, 0, 11 }, { "dashboard", 0, 0, 'd' }, { "quiet", 0, 0, 'q' },
         { "radar", 1, 0, 'r' }, { "modes-only", 0, 0, 'S' }, { "aircraft", 1, 0, 'A' },
+        { "rollcall-only", 0, 0, 'R' },
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
         { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
     };
     int c;
-    while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SA:Bh", lo, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SRA:Bh", lo, NULL)) != -1) {
         switch (c) {
         case 'f': opt.file = optarg; break;
         case 'w': opt.record = optarg; break;
@@ -308,6 +311,7 @@ int main(int argc, char **argv)
             if (opt.acfg.radar_sel < 0) { fprintf(stderr, "bad radar code '%s' (use SI1-63 or II0-15)\n", optarg); return 1; }
             break;
         case 'S': opt.acfg.modes_only = true; break;
+        case 'R': opt.acfg.rollcall_only = true; break;
         case 'A':
             if (!parse_aircraft(optarg)) { fprintf(stderr, "bad aircraft '%s'\n", optarg); return 1; }
             break;
@@ -365,6 +369,7 @@ int main(int argc, char **argv)
             o += snprintf(ri.filters + o, sizeof(ri.filters) - o, "radar %s  ", rc);
         }
         if (opt.acfg.modes_only) o += snprintf(ri.filters + o, sizeof(ri.filters) - o, "Mode S only  ");
+        if (opt.acfg.rollcall_only) o += snprintf(ri.filters + o, sizeof(ri.filters) - o, "roll-calls only  ");
         if (opt.acfg.ac_addr >= 0)
             o += snprintf(ri.filters + o, sizeof(ri.filters) - o, "aircraft %06llX  ", (unsigned long long)opt.acfg.ac_addr);
         if (opt.acfg.ac_callsign[0])

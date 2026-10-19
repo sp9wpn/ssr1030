@@ -146,9 +146,9 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     {
         char fl[200];
         int o = snprintf(fl, sizeof(fl), "Filters: %s", ri->filters[0] ? ri->filters : "none");
-        if (AS.filt_radar || AS.filt_modes || AS.filt_aircraft)
-            snprintf(fl + o, sizeof(fl) - o, "  (dropped: radar %ld, non-S %ld, aircraft %ld)",
-                     AS.filt_radar, AS.filt_modes, AS.filt_aircraft);
+        if (AS.filt_radar || AS.filt_modes || AS.filt_rollcall || AS.filt_aircraft)
+            snprintf(fl + o, sizeof(fl) - o, "  (dropped: radar %ld, non-S %ld, all-call %ld, aircraft %ld)",
+                     AS.filt_radar, AS.filt_modes, AS.filt_rollcall, AS.filt_aircraft);
         printf("%s", fl);
         if (ri->adsb) {
             struct adsb_stats as;
