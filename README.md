@@ -88,6 +88,15 @@ Dashboard keys:
 
 Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coincidences of unrelated pulses.
 
+## Dashboard layout
+
+Below the status lines there are three columns:
+- **Interrogations:** per type, with total, in-beam, sidelobe and rate.
+- **Comm-B BDS:** per requested register, with register and shortcode (`4,0 selAlt`), total, in-beam, sidelobe and rate.
+- **Radars:** one line each with bursts, rotation, dwell and interrogations per burst. Below them, UF11 codes, DI/PC and the roll-called count.
+
+The three columns need about 150 terminal columns. Below them come the burst table, the last burst sequence, the interleaving table and the recent interrogations.
+
 ## Gain
 
 **Automatic gain is on by default** (`--no-auto-gain` turns it off, `g` toggles it).

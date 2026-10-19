@@ -96,6 +96,7 @@ void radar_code_str(int code, char *buf, size_t len);    /* "SI17", "II3", "?" *
 const char *kind_label(int k);
 const char *kind_name(int k);    /* identifier for log files */
 const char *kind_token(int k);
+const char *bds_abbrev(int bds);                 /* shortcode for BDS1*16+BDS2, NULL if unnamed */
 uint16_t seq_token(const struct interrog *it);   /* kind + requested BDS, for burst sequences */
 const char *seq_token_str(uint16_t t, char *buf, size_t len);
 bool kind_is_modes(int k);

@@ -112,7 +112,7 @@ struct analysis_state {
     int prev_tok, prev_burst; double prev_t;
 
     long uf11_code[2][64][16];  /* [is_si][code][pr] */
-    long bds[256];
+    long bds[256], bds_inbeam[256], bds_side[256];
     long pc[8];
     long di[8];
     struct addr_entry addrs[ADDR_HASH];

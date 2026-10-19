@@ -18,6 +18,19 @@ static uint64_t last_samples, last_clip, last_pulses, last_clip_prev, last_sampl
 static long last_total[K_COUNT];
 static double last_now = -1;
 static float rate[K_COUNT];
+static long last_bds[256];
+static float bds_rate[256];
+
+/* spaces needed to pad s to w visible columns (escape sequences excluded) */
+static int pad_to(const char *s, int w)
+{
+    int vis = 0;
+    for (const char *p = s; *p; p++) {
+        if (*p == '\033') { while (*p && *p != 'm') p++; continue; }
+        if ((*p & 0xC0) != 0x80) vis++;
+    }
+    return w - vis > 0 ? w - vis : 0;
+}
 
 /* signal level history, so warnings cover several antenna rotations */
 #define LVL_N 128
@@ -332,9 +345,9 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
            AS.tcas_total, AS.tcas_uf0, AS.tcas_uf16, AS.tcas_ws, AS.naddr_tcas);
     fputs(EL, stdout);
 
-    /* left: per kind table; right: radars */
-    char left[24][80], right[24][160];
-    int nl = 0, nr = 0;
+    /* left: per kind table; middle: per BDS register table; right: radars and misc */
+    char left[24][80], mid[24][96], right[24][160];
+    int nl = 0, nm = 0, nr = 0;
     snprintf(left[nl++], 80, B "%-24s %8s %7s %7s %6s" R, "Interrogation", "total", "in-beam", "sidelb", "/s");
     for (int k = 0; k < K_COUNT && nl < 24; k++) {
         if (!AS.total[k] || k == K_UF0 || k == K_UF16) continue;
@@ -343,23 +356,28 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     }
     if (nl == 1) snprintf(left[nl++], 80, DIM "(no radar interrogations yet)" R);
 
-    snprintf(right[nr++], 160, B "Radar   bursts  rotation  dwell  interrog/burst avg [min-max]" R);
-    for (int r = 0; r < AS.nradars && nr < 22; r++) {
+    snprintf(mid[nm++], 96, B "%-14s %7s %7s %6s %5s" R, "Comm-B BDS", "total", "in-beam", "sidelb", "/s");
+    for (int b = 0; b < 256 && nm < 24; b++) {
+        if (!AS.bds[b]) continue;
+        const char *ab = bds_abbrev(b);
+        char lab[16];
+        snprintf(lab, sizeof(lab), "%X,%X %s", b >> 4, b & 15, ab ? ab : "");
+        float r = (AS.bds[b] - last_bds[b]) / (dt > 0 ? dt : 1);
+        bds_rate[b] = dt > 0 ? bds_rate[b] * 0.7f + r * 0.3f : bds_rate[b];
+        snprintf(mid[nm++], 96, "%-14s %7ld %7ld %6ld %5.1f", lab, AS.bds[b], AS.bds_inbeam[b], AS.bds_side[b], bds_rate[b]);
+    }
+    memcpy(last_bds, AS.bds, sizeof(last_bds));
+    if (nm == 1) snprintf(mid[nm++], 96, DIM "(no Comm-B requests yet)" R);
+
+    snprintf(right[nr++], 160, B "Radar  bursts rotation  dwell  per burst" R);
+    for (int r = 0; r < AS.nradars && nr < 12; r++) {
         struct radar *X = &AS.radars[r];
         int np = X->np < 64 ? X->np : 64;
         char rot[16] = "      -";
         if (np) snprintf(rot, sizeof(rot), "%7.3fs", median_d(X->periods, np));
-        snprintf(right[nr++], 160, "%-6s %7d  %s %5.1fms  total %.1f", X->key, X->nbursts + X->npartial,
-                 rot, X->nbursts ? 1e3 * X->dwell_sum / X->nbursts : 0,
+        snprintf(right[nr++], 160, "%-6s %6d %s %5.1fms %6.1f", X->key, X->nbursts + X->npartial, rot,
+                 X->nbursts ? 1e3 * X->dwell_sum / X->nbursts : 0,
                  X->nbursts ? (double)X->total_sum / X->nbursts : 0);
-        char line[160]; int o = 0;
-        o += snprintf(line + o, sizeof(line) - o, "      ");
-        for (int g = 0; g < G_COUNT && o < 150; g++) {
-            if (!X->cnt_max[g]) continue;
-            o += snprintf(line + o, sizeof(line) - o, " %s %.1f[%d-%d]", group_label(g),
-                          (double)X->cnt_sum[g] / X->nbursts, X->cnt_min[g], X->cnt_max[g]);
-        }
-        snprintf(right[nr++], 160, "%s", line);
     }
     if (AS.nradars == 0) snprintf(right[nr++], 160, DIM "(waiting for a main-beam burst)" R);
     nr++; right[nr - 1][0] = 0;
@@ -373,10 +391,6 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
                         o += snprintf(line + o, sizeof(line) - o, " %s%d/PR%d:%ld", si ? "SI" : "II", c, p,
                                       AS.uf11_code[si][c][p]);
         snprintf(right[nr++], 160, "%s", line);
-        o = snprintf(line, sizeof(line), B "Comm-B BDS" R);
-        for (int b = 0; b < 256; b++)
-            if (AS.bds[b] && o < 150) o += snprintf(line + o, sizeof(line) - o, " %X,%X:%ld", b >> 4, b & 15, AS.bds[b]);
-        snprintf(right[nr++], 160, "%s", line);
         o = snprintf(line, sizeof(line), B "DI" R);
         for (int k = 0; k < 8; k++) if (AS.di[k]) o += snprintf(line + o, sizeof(line) - o, " %d:%ld", k, AS.di[k]);
         o += snprintf(line + o, sizeof(line) - o, "  " B "PC" R);
@@ -385,15 +399,11 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         snprintf(right[nr++], 160, B "Roll-called aircraft" R " %d", AS.naddr_radar);
     }
     int rows = nl > nr ? nl : nr;
+    if (nm > rows) rows = nm;
     for (int i = 0; i < rows; i++) {
-        /* left column is padded by visible width (escape codes excluded) */
-        const char *l = i < nl ? left[i] : "";
-        int vis = 0;
-        for (const char *p = l; *p; p++) {
-            if (*p == '\033') { while (*p && *p != 'm') p++; continue; }
-            vis++;
-        }
-        printf("%s%*s  %s" EL, l, 58 - vis > 0 ? 58 - vis : 0, "", i < nr ? right[i] : "");
+        /* columns are padded by visible width (escape codes excluded) */
+        const char *l = i < nl ? left[i] : "", *mm = i < nm ? mid[i] : "";
+        printf("%s%*s  %s%*s  %s" EL, l, pad_to(l, 58), "", mm, pad_to(mm, 46), "", i < nr ? right[i] : "");
     }
     fputs(EL, stdout);
 

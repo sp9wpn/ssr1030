@@ -392,7 +392,12 @@ static bool stage2(struct interrog *x, int burst_code)
     }
     if (k == K_UF4 || k == K_UF5 || k == K_UF20 || k == K_UF21) {
         int b1, b2;
-        if (modes_bds(x->msg, &b1, &b2)) AS.bds[b1 * 16 + b2]++;
+        if (modes_bds(x->msg, &b1, &b2)) {
+            int b = b1 * 16 + b2;
+            AS.bds[b]++;
+            if (x->burst >= 0) AS.bds_inbeam[b]++;
+            if (x->sidelobe) AS.bds_side[b]++;
+        }
         AS.pc[getbits(x->msg, 6, 8)]++;
         AS.di[getbits(x->msg, 14, 16)]++;
     }

@@ -202,7 +202,7 @@ bool kind_is_allcall(int k)
 }
 
 /* Comm-B register (BDS) abbreviations for burst sequences */
-static const char *bds_abbrev(int b)
+const char *bds_abbrev(int b)
 {
     switch (b) {
     case 0x00: return "aicb";      /* air-initiated Comm-B */
