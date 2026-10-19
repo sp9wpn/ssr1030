@@ -352,12 +352,15 @@ static void rec_add(struct burst *b, const struct interrog *x)
     if (x->amp_db > b->peak) { b->peak = x->amp_db; b->tpeak = x->t; }
     uint16_t tok = seq_token(x);
     b->gcnt[tok_group(tok)]++;
-    if (b->nks < SEQ_MAX) b->ks[b->nks++] = tok;
+    int k = NO_TARGET;
     if (directed(x->kind)) {
-        int k;
         for (k = 0; k < b->naddr; k++) if (b->addrs[k] == x->addr) break;
-        if (k == b->naddr && b->naddr < 64) b->addrs[b->naddr++] = x->addr;
+        if (k == b->naddr) {
+            if (b->naddr < 64) b->addrs[b->naddr++] = x->addr;
+            else k = NO_TARGET;
+        }
     }
+    if (b->nks < SEQ_MAX) { b->ks[b->nks] = tok; b->ka[b->nks] = (uint8_t)k; b->nks++; }
 }
 
 static void commit(struct burst *b)
@@ -395,6 +398,48 @@ static void commit(struct burst *b)
     }
     AS.hist[AS.nhist % BURST_HIST] = *b;
     AS.nhist++;
+}
+
+/* ---------------- burst rendering helpers ---------------- */
+
+static const struct burst *rank_b;
+static int cmp_target(const void *x, const void *y)
+{
+    char a[12], b[12];
+    snprintf(a, sizeof(a), "%s", ac_name(rank_b->addrs[*(const int *)x]));
+    snprintf(b, sizeof(b), "%s", ac_name(rank_b->addrs[*(const int *)y]));
+    return strcmp(a, b);
+}
+
+void burst_ranks(const struct burst *b, int *rank)
+{
+    int idx[64];
+    for (int k = 0; k < b->naddr; k++) idx[k] = k;
+    rank_b = b;
+    qsort(idx, b->naddr, sizeof(int), cmp_target);
+    for (int r = 0; r < b->naddr; r++) rank[idx[r]] = r + 1;
+}
+
+int burst_item(const struct burst *b, int s, const int *rank, char *out, size_t n)
+{
+    int e = s;
+    while (e < b->nks && b->ks[e] == b->ks[s] && b->ka[e] == b->ka[s]) e++;
+    char ts[24], tg[8] = "";
+    seq_token_str(b->ks[s], ts, sizeof(ts));
+    if (b->ka[s] != NO_TARGET) snprintf(tg, sizeof(tg), "/%d", rank[b->ka[s]]);
+    if (e - s > 1) snprintf(out, n, "%s%s#%d ", ts, tg, e - s);
+    else snprintf(out, n, "%s%s ", ts, tg);
+    return e;
+}
+
+void burst_targets(const struct burst *b, const int *rank, char *out, size_t n)
+{
+    int byrank[64];
+    for (int k = 0; k < b->naddr; k++) byrank[rank[k] - 1] = k;
+    size_t o = 0;
+    out[0] = 0;
+    for (int r = 0; r < b->naddr && o + 1 < n; r++)
+        o += snprintf(out + o, n - o, "%s%d/%s", r ? " " : "", r + 1, ac_name(b->addrs[byrank[r]]));
 }
 
 /* drain the output queue through stage 2; members of burst `id` are
@@ -550,24 +595,19 @@ void analysis_print_summary(FILE *f)
         if (b->period > 0) fprintf(f, " P=%.3fs", b->period);
         for (int g = 0; g < G_COUNT; g++) if (b->gcnt[g]) fprintf(f, " %s:%d", group_label(g), b->gcnt[g]);
         fprintf(f, "\n     ");
-        int col = 5;
+        int col = 5, rank[64];
+        burst_ranks(b, rank);
         for (int s = 0; s < b->nks;) {
-            int e = s;
-            while (e < b->nks && b->ks[e] == b->ks[s]) e++;
-            char tok[48], ts[24];
-            seq_token_str(b->ks[s], ts, sizeof(ts));
-            if (e - s > 1) snprintf(tok, sizeof(tok), "%s#%d ", ts, e - s);
-            else snprintf(tok, sizeof(tok), "%s ", ts);
+            char tok[48];
+            s = burst_item(b, s, rank, tok, sizeof(tok));
             if (col + (int)strlen(tok) > 110) { fprintf(f, "\n     "); col = 5; }
             fputs(tok, f);
             col += strlen(tok);
-            s = e;
         }
         if (b->naddr) {
-            fprintf(f, "\n     targets:");
-            for (int a = 0; a < b->naddr; a++) {
-                fprintf(f, " %s", ac_name(b->addrs[a]));
-            }
+            char tl[1024];
+            burst_targets(b, rank, tl, sizeof(tl));
+            fprintf(f, "\n     targets: %s", tl);
         }
         fputc('\n', f);
     }

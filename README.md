@@ -137,7 +137,10 @@ They are left out of all radar analysis.
 | `S-msg` | Comm-A UF20/21 (`S-msg/hdgSpd` = also requests BDS 6,0) |
 | `S-elm` `S-mil` `S-sls` | UF24 ELM, UF19, Mode S without sync (sidelobe) |
 
-The interleaving statistics use the same tokens.
+Roll-calls carry the number of their target, for example `alt/1` or `setAlt/2#2`.
+Targets are listed under the sequence, numbered in alphabetical order of their callsign or hex: `targets: 1/452124 2/DLH123`.
+
+The interleaving statistics use the same tokens, without the target numbers.
 
 ## Log columns
 

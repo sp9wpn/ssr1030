@@ -47,15 +47,12 @@ static int term_cols(void)
 
 static void print_seq(const struct burst *b, int cols, int maxlines)
 {
-    int col = 2, lines = 0;
+    int col = 2, lines = 0, rank[64];
+    burst_ranks(b, rank);
     fputs("  ", stdout);
     for (int s = 0; s < b->nks;) {
-        int e = s;
-        while (e < b->nks && b->ks[e] == b->ks[s]) e++;
-        char tok[48], ts[24];
-        seq_token_str(b->ks[s], ts, sizeof(ts));
-        if (e - s > 1) snprintf(tok, sizeof(tok), "%s#%d ", ts, e - s);
-        else snprintf(tok, sizeof(tok), "%s ", ts);
+        char tok[48];
+        s = burst_item(b, s, rank, tok, sizeof(tok));
         if (col + (int)strlen(tok) >= cols - 1) {
             if (++lines >= maxlines) { fputs("...", stdout); break; }
             fputs(EL "  ", stdout);
@@ -63,7 +60,24 @@ static void print_seq(const struct burst *b, int cols, int maxlines)
         }
         fputs(tok, stdout);
         col += strlen(tok);
-        s = e;
+    }
+    fputs(EL, stdout);
+    char tl[1024];
+    burst_targets(b, rank, tl, sizeof(tl));
+    if (b->naddr) {
+        /* wrap the target list like the sequence */
+        fputs("  targets:", stdout);
+        col = 10;
+        lines = 0;
+        for (char *t = strtok(tl, " "); t; t = strtok(NULL, " ")) {
+            if (col + (int)strlen(t) + 1 >= cols - 1) {
+                if (++lines >= 2) { fputs(" ...", stdout); break; }
+                fputs(EL "          ", stdout);
+                col = 10;
+            }
+            printf(" %s", t);
+            col += strlen(t) + 1;
+        }
     }
     fputs(EL, stdout);
 }
@@ -256,11 +270,6 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
                "  (A C A/C-only all-call, AA CC plain A/C, S UF11 all-call, alt/sqk UF4/5, acid/setAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0, S-msg Comm-A, #N repeat)" R EL,
                b->id);
         print_seq(b, cols, 4);
-        char tl[400]; int o = snprintf(tl, sizeof(tl), "  targets:");
-        for (int a = 0; a < b->naddr && o < cols - 18 && o < 380; a++) {
-            o += snprintf(tl + o, sizeof(tl) - o, " %s", ac_name(b->addrs[a]));
-        }
-        printf("%s" EL, b->naddr ? tl : "");
     } else fputs(EL EL EL, stdout);
 
     /* transitions */

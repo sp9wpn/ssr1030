@@ -10,6 +10,7 @@
 #define ADDR_HASH    8192
 #define RECENT_N     8
 #define NCODES       80          /* radar codes: II 0-15, SI 16+1..63 */
+#define NO_TARGET    255
 #define TR_N         1024        /* distinct token transitions tracked */
 
 /* query-type groups used in per-burst tables; every interrogation is in exactly one */
@@ -28,6 +29,7 @@ struct burst {
     int cnt[K_COUNT];
     int gcnt[G_COUNT];      /* by query type (tok_group) */
     uint16_t ks[SEQ_MAX];   /* sequence tokens (seq_token) in arrival order */
+    uint8_t ka[SEQ_MAX];    /* target index into addrs[], NO_TARGET when none */
     int nks;
     int naddr;              /* distinct roll-call addresses */
     uint32_t addrs[64];
@@ -112,5 +114,8 @@ int tok_group(uint16_t tok);     /* seq_token -> group */
 const char *group_label(int g);
 double median_d(const double *v, int n);
 int analysis_top_transitions(struct trans *out, int max);
+void burst_ranks(const struct burst *b, int *rank);          /* alphabetical target numbers, 1-based */
+int burst_item(const struct burst *b, int s, const int *rank, char *out, size_t n);  /* run at s -> next */
+void burst_targets(const struct burst *b, const int *rank, char *out, size_t n);   /* "1/DLH123 2/..." */
 
 #endif
