@@ -103,17 +103,36 @@ static float reversal_corr(struct demod *d, double t, int h, float complex *prod
     return mag > 0 ? crealf(p) / mag : 0;
 }
 
-static void p5_measure(struct demod *d, double ts, float *p5, float *p6)
+/* Around the sync reversal the signal is P5 (constant, if present) plus P6
+ * whose sign flips once. Least-squares fit over +-0.35 us: for each split,
+ * c = (mean_before + mean_after) / 2 is P5 and (mean_before - mean_after) / 2
+ * is P6; the split with the smallest residual is the reversal. Samples next
+ * to the split (the band-limited transition) are left out. */
+static void p5_fit(struct demod *d, double center, float *p5, float *p6, double *tau)
 {
-    int a0 = (int)lround(0.125 * d->spus), a1 = (int)lround(0.375 * d->spus);
-    if (a1 <= a0) a1 = a0 + 1;
-    float complex z1 = 0, z2 = 0;
-    uint64_t c = (uint64_t)llround(ts);
-    for (int k = a0; k < a1; k++) { z1 += Z(d, c - k); z2 += Z(d, c + k); }
-    z1 /= (a1 - a0);
-    z2 /= (a1 - a0);
-    *p5 = cabsf(z1 + z2) / 2;
-    *p6 = cabsf(z1 - z2) / 2;
+    int w = (int)lround(0.35 * d->spus), g = (int)lround(0.08 * d->spus);
+    if (g < 1) g = 1;
+    uint64_t c0 = (uint64_t)llround(center);
+    float best = 1e30f;
+    *p5 = 0; *p6 = 0; *tau = center;
+    for (int s = -w + 2 * g + 1; s <= w - 2 * g - 1; s++) {
+        float complex mb = 0, ma = 0;
+        int nb = 0, na = 0;
+        for (int k = -w; k <= s - g; k++) { mb += Z(d, c0 + k); nb++; }
+        for (int k = s + g; k <= w; k++) { ma += Z(d, c0 + k); na++; }
+        if (nb < 2 || na < 2) continue;
+        mb /= nb; ma /= na;
+        float r = 0;
+        for (int k = -w; k <= s - g; k++) { float complex e = Z(d, c0 + k) - mb; r += crealf(e * conjf(e)); }
+        for (int k = s + g; k <= w; k++) { float complex e = Z(d, c0 + k) - ma; r += crealf(e * conjf(e)); }
+        r /= nb + na;
+        if (r < best) {
+            best = r;
+            *p5 = cabsf(mb + ma) / 2;
+            *p6 = cabsf(mb - ma) / 2;
+            *tau = (double)c0 + s;
+        }
+    }
 }
 
 static void decode_modes(struct demod *d, struct interrog *it, double p6lead, double p6width)
@@ -148,23 +167,26 @@ static void decode_modes(struct demod *d, struct interrog *it, double p6lead, do
     }
     it->sync = best;
 
-    /* P5 (Mode S SLS) overlaps the sync reversal. P6 flips phase there, P5
-     * does not: with z1/z2 the mean samples just before/after the reversal,
-     * P5 = |z1 + z2| / 2 and P6 = |z1 - z2| / 2. Measured at the nominal and
-     * at the found sync position (a strong P5 can fake or mask the reversal);
-     * the larger P5 counts. */
+    /* P5 (Mode S SLS) overlaps the sync reversal: fitted around the nominal
+     * sync, see p5_fit(). The fitted split is the reversal itself, so when P6
+     * is clearly present and stronger than P5 it also gives the sync, even if
+     * the reversal falls between samples and correlates weakly. */
     {
-        float p5 = 0, p6 = 0;
-        double pos[2] = { exp_sync, best_t };
-        for (int q = 0; q < (best_t != exp_sync ? 2 : 1); q++) {
-            float a5, a6;
-            p5_measure(d, pos[q], &a5, &a6);
-            if (a5 > p5) { p5 = a5; p6 = a6; }
-        }
+        float p5, p6;
+        double tau;
+        p5_fit(d, exp_sync, &p5, &p6, &tau);
         it->p5_db = p5 >= d->thr ? dbfs(p5) : NAN;     /* absolute here, made relative to P1 by the caller */
-        /* transponder rule: P5 at least as strong as P6 = sidelobe; a
-         * transponder would not reply, but the data chips after P5 are intact */
-        if (!isnan(it->p5_db) && p5 >= p6) { it->sidelobe = true; best = 2; }
+        if (!isnan(it->p5_db) && p5 >= p6) {
+            /* transponder rule: P5 at least as strong as P6 = sidelobe. A
+             * transponder would not reply, but the data chips after P5 are intact */
+            it->sidelobe = true;
+            best = 2;
+            exp_sync = tau;
+        } else if (p6 >= d->thr && best > -0.5f) {
+            best_t = tau;
+            best = -0.5f - 1e-3f;                     /* sync taken from the fit */
+            it->sync = best;
+        }
     }
 
     int len_class = 0;

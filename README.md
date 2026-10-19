@@ -159,7 +159,9 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
   - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
   - `▒` other weak query that is not SLS
 - **SLS pulses:** `P2` (A/C) and `P5` (Mode S) are drawn at the column matching their level. They appear inside the bar when weaker than P1, and after the bar end when stronger, which is what suppresses the transponder.
-  - P5 is measured at the sync phase reversal. P6 flips phase there but P5 does not, so with z1/z2 the samples just before and after it, P5 = |z1+z2|/2 and P6 = |z1−z2|/2. This also works when a strong P5 masks the sync (`S-sls`).
+  - P5 is measured at the sync phase reversal. P6 flips phase there but P5 does not.
+  - Across ±0.35 µs around the expected sync, the signal is fitted as a constant P5 plus a P6 that changes sign once. The best split point is the reversal, and P5 = |mean before + mean after|/2, P6 = |mean before − mean after|/2.
+  - This finds the reversal even when it falls between samples, and it also works when a strong P5 masks the sync.
   - In Mode S, P2 is part of the preamble, so it is not marked.
 - **Sidelobe Mode S is decoded.** P5 ≥ P6 means a transponder would not reply (the query is not for us), but P5 covers only the sync reversal and the data chips after it are intact.
   - The bit timing is recovered within ±half a chip of the nominal sync, and the query is shown with its real type and target plus `sls`.
