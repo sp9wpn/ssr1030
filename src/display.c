@@ -109,7 +109,7 @@ static void draw_graph(int cols, int rows)
            b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n, b->nside,
            b->nweak, g_scroll + 1, last, n);
 
-    int W = cols - 36;
+    int W = cols - 43;
     if (W < 10) W = 10;
     for (int i = g_scroll; i < last; i++) {
         const struct gpoint *g = &b->gp[i];
@@ -119,8 +119,8 @@ static void draw_graph(int cols, int rows)
         int len = (int)lroundf((g->amp - ybot) / (ytop - ybot) * W);
         if (len < 1) len = 1;
         if (len > W) len = W;
-        /* fixed-width fields: query type 6, target (callsign or hex) 7 */
-        printf("%s%+10.2f ms  %-6.6s %-7.7s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), ts, tg, g->amp);
+        /* fixed-width fields: query 12 (longest token, e.g. S-msg/hdgSpd), target 8 (callsign or hex) */
+        printf("%s%+10.2f ms  %-12.12s %-8.8s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), ts, tg, g->amp);
         fputs(R, stdout);
         fputs(gp_color(g->cls), stdout);
         for (int k = 0; k < len; k++) fputs(gp_char(g->cls), stdout);

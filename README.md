@@ -143,13 +143,13 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 `b` switches the whole screen to the latest beam pass of the main radar, one row per query in time order:
 
 ```
-  -2172.92 ms  S-sls           -16.5 ░░░░░░░░░░░░░
-    -36.42 ms  setAlt 4A2182    -9.1 ████████████████████████████████
-    -23.35 ms  A                 1.2 ████████████████████████████████████████████████████████████
-    +47.23 ms  AA              -20.1 ▒▒▒▒
+  -2172.92 ms  S-sls                  -16.5 ░░░░░░░░░░░░
+    -36.42 ms  setAlt       4A2182     -9.1 █████████████████████████████
+    -23.35 ms  A                        1.2 ███████████████████████████████████████████████████████
+    +47.23 ms  AA                     -20.1 ▒▒▒▒
 ```
 
-- **Each row:** time relative to the middle of the beam pass, query token (6 characters), target (7 characters: callsign when known, else hex address), amplitude in dBFS, and a bar whose length is the amplitude.
+- **Each row:** time relative to the middle of the beam pass, query token (12 characters), target (8 characters: callsign when known, else hex address), amplitude in dBFS, and a bar whose length is the amplitude.
 - **Bar character:**
   - `█` in-beam query
   - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
