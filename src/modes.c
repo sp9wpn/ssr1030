@@ -215,7 +215,7 @@ static const char *bds_abbrev(int b)
     case 0x17: return "gicb";      /* common-usage GICB capability */
     case 0x18: case 0x19: case 0x1A: case 0x1B: case 0x1C: return "mscap";
     case 0x1D: case 0x1E: case 0x1F: return "mscap";
-    case 0x20: return "call";      /* aircraft identification (callsign) */
+    case 0x20: return "acid";     /* aircraft identification (callsign) */
     case 0x21: return "reg";       /* registration */
     case 0x25: return "type";      /* aircraft type */
     case 0x30: return "ra";        /* ACAS resolution advisory */

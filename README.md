@@ -116,7 +116,7 @@ They are left out of all radar analysis.
   - `AA/CC`, `A/C`, `ACSall`: plain Mode A/C, A/C-only all-calls, A/C/S all-calls.
   - `S-all`: UF11 all-calls.
   - `S-alt`, `S-sqk`: UF4 and UF5 roll-calls without a Comm-B request.
-  - `call`, `setAlt`, `trk`, `hdgSpd`: Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
+  - `acid`, `setAlt`, `trk`, `hdgSpd`: Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
   - `oBDS`: any other BDS.
   - `msg`: Comm-A without a request.
   - `other`: UF24, UF19 and the rest.
@@ -130,7 +130,7 @@ They are left out of all radar analysis.
 | `As` `Cs` | A/C/S all-call (long P4) |
 | `S-all` | UF11 Mode S all-call (acquisition) |
 | `S-alt` / `S-sqk` | UF4 altitude / UF5 Mode A code roll-call, no Comm-B |
-| `call` `setAlt` `trk` `hdgSpd` | Roll-call requesting Comm-B BDS 2,0 callsign / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
+| `acid` `setAlt` `trk` `hdgSpd` | Roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
 | `cap` `gicb` `pos` `met` `ra` `aicb` … | BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
 | `S-msg` | Comm-A UF20/21 (`S-msg/hdgSpd` = also requests BDS 6,0) |
 | `S-elm` `S-mil` `S-sls` | UF24 ELM, UF19, Mode S without sync (sidelobe) |

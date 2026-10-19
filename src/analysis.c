@@ -43,7 +43,7 @@ static int last11_code = -1;
 static unsigned target_ver = ~0u;
 
 static const char *group_labels[G_COUNT] = {
-    "AA/CC", "A/C", "ACSall", "S-all", "S-alt", "S-sqk", "call", "setAlt", "trk", "hdgSpd", "oBDS",
+    "AA/CC", "A/C", "ACSall", "S-all", "S-alt", "S-sqk", "acid", "setAlt", "trk", "hdgSpd", "oBDS",
     "msg", "other"
 };
 
@@ -574,7 +574,7 @@ void analysis_print_summary(FILE *f)
         fprintf(f, "  (* = burst touched an ADS-B window; excluded from per-burst statistics)\n");
         fprintf(f, "  tokens: A C A/C-only all-call | AA CC plain Mode A/C | As Cs A/C/S all-call | S-all UF11 all-call\n"
                    "          S-alt UF4 altitude | S-sqk UF5 Mode A code | S-msg Comm-A (UF20/21) | S-elm UF24\n"
-                   "          Comm-B: call 2,0 callsign | setAlt 4,0 selected alt | trk 5,0 track/turn |\n"
+                   "          Comm-B: acid 2,0 aircraft identification (callsign) | setAlt 4,0 selected alt | trk 5,0 track/turn |\n"
                    "          hdgSpd 6,0 heading/speed | cap 1,0 | gicb 1,7 | pos 5,1/5,2 | met 4,4 | S-bXY other\n");
     }
 
