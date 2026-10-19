@@ -52,20 +52,22 @@ static int term_rows(void)
     return 50;
 }
 
-/* bottom line: filter input, last command result, or key help */
-static void draw_status_line(const struct run_info *ri)
+/* bottom line: filter input, last command result, or key help. On the last
+ * screen row it must not end with a newline, or the terminal scrolls. */
+static void draw_status_line(const struct run_info *ri, bool last_row)
 {
+    const char *end = last_row ? "\033[K" R : EL;
     if (ri->cmd_mode)
-        printf(B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R EL,
-               ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
+        printf(B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R "%s",
+               ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd, end);
     else if (ri->cmd_msg[0])
-        printf(YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  b graph  x reset" R EL,
-               ri->cmd_msg);
+        printf(YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  b graph  x reset"
+               R "%s", ri->cmd_msg, end);
     else if (ri->graph)
         printf(DIM "keys: b dashboard  \u2191\u2193 PgUp PgDn Home End scroll  r radar filter  a aircraft filter  "
-               "S Mode S only  R roll-calls only  q quit" R EL);
+               "S Mode S only  R roll-calls only  q quit" R "%s", end);
     else printf(DIM "keys: q quit  +/- VGA  L/l LNA  p RF amp (manual)  g auto gain  r radar filter  a aircraft filter  "
-                "S Mode S only  R roll-calls only  b burst graph  x reset stats" R EL);
+                "S Mode S only  R roll-calls only  b burst graph  x reset stats" R "%s", end);
 }
 
 /* ---------- burst graph screen ('b') ----------
@@ -261,9 +263,9 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     if (ri->graph) {
         int rows = term_rows();
         draw_graph(cols, rows - 1);           /* last row: status / filter input */
+        fputs("\033[J", stdout);               /* clear below the chart, then the last row */
         printf("\033[%d;1H", rows);
-        draw_status_line(ri);
-        fputs("\033[J", stdout);
+        draw_status_line(ri, true);
         fflush(stdout);
         return;
     }
@@ -439,7 +441,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         if ((int)strlen(buf) > cols - 1) buf[cols - 1] = 0;
         printf("%s" EL, buf);
     }
-    draw_status_line(ri);
+    draw_status_line(ri, false);
     fputs("\033[J", stdout);
     fflush(stdout);
 }
