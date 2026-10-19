@@ -285,10 +285,12 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     for (int i = 0; i < 8; i += 2) {
         for (int j = i; j < i + 2; j++) {
             if (j >= nt) continue;
-            char ta[24], tb[24];
-            printf("  %-10s -> %-10s %6ld  %7.3f [%.3f-%.3f]   ", seq_token_str(top[j].a, ta, sizeof(ta)),
-                   seq_token_str(top[j].b, tb, sizeof(tb)), top[j].n, 1e3 * top[j].sum / top[j].n,
-                   1e3 * top[j].min, 1e3 * top[j].max);
+            /* fixed-width cell so the second column lines up */
+            char ta[24], tb[24], cell[96];
+            snprintf(cell, sizeof(cell), "%-12s -> %-12s %6ld %8.3f [%7.3f -%8.3f]",
+                     seq_token_str(top[j].a, ta, sizeof(ta)), seq_token_str(top[j].b, tb, sizeof(tb)), top[j].n,
+                     1e3 * top[j].sum / top[j].n, 1e3 * top[j].min, 1e3 * top[j].max);
+            printf("  %-66s", cell);
         }
         fputs(EL, stdout);
     }
