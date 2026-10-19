@@ -78,6 +78,8 @@ static void draw_graph(int cols, int rows)
     float amax = -99, amin = 99;
     for (int i = n - 1; i >= 0; i--) {
         if (b->gp[i].amp > amax) amax = b->gp[i].amp;
+        if (!isnan(b->gp[i].p2) && b->gp[i].p2 > amax) amax = b->gp[i].p2;
+        if (!isnan(b->gp[i].p5) && b->gp[i].p5 > amax) amax = b->gp[i].p5;
         if (b->gp[i].amp < amin) amin = b->gp[i].amp;
         if (b->gp[i].cls == GP_BEAM) first_beam = i;
     }
@@ -122,11 +124,31 @@ static void draw_graph(int cols, int rows)
         int len = (int)lroundf((g->amp - ybot) / (ytop - ybot) * W);
         if (len < 1) len = 1;
         if (len > W) len = W;
+        /* SLS pulse marker "P2"/"P5" ending at the column of its level */
+        const char *mk = NULL;
+        float mv = NAN;
+        if (!isnan(g->p2)) { mk = "P2"; mv = g->p2; }
+        else if (!isnan(g->p5)) { mk = "P5"; mv = g->p5; }
+        int mpos = -1;
+        if (mk) {
+            mpos = (int)lroundf((mv - ybot) / (ytop - ybot) * W);
+            if (mpos < 2) mpos = 2;
+            if (mpos > W) mpos = W;
+        }
         /* fixed-width fields: query 12 (longest token, e.g. S-msg/hdgSpd), target 8 (callsign or hex) */
         printf("%s%+10.2f ms  %-12.12s %-8.8s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), ts, tg, g->amp);
         fputs(R, stdout);
-        fputs(gp_color(g->cls), stdout);
-        for (int k = 0; k < len; k++) fputs(gp_char(g->cls), stdout);
+        int end = mpos > len ? mpos : len;
+        for (int k = 0; k < end; k++) {
+            if (mk && k >= mpos - 2 && k < mpos) {
+                /* inside the bar: inverse, beyond it: plain bold */
+                printf(k < len ? R "\033[1;7;31m%c" R : R B RED "%c" R, mk[k - (mpos - 2)]);
+            } else if (k < len) {
+                printf("%s%s", gp_color(g->cls), gp_char(g->cls));
+            } else {
+                fputs(R " ", stdout);
+            }
+        }
         fputs(R EL, stdout);
     }
 }

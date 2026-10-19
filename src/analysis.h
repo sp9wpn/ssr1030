@@ -21,6 +21,7 @@ enum group { G_AC, G_ACONLY, G_ACS, G_SALL, G_SALT, G_SSQK, G_CAL, G_SETALT, G_T
 struct gpoint {
     double t;               /* stream time, s */
     float amp;              /* dBFS */
+    float p2, p5;           /* SLS pulse levels, dBFS; NAN when not detected */
     uint16_t tok;           /* seq_token */
     uint8_t ka;             /* target index, NO_TARGET when none */
     uint8_t cls;            /* GP_BEAM, GP_SIDE, GP_WEAK */

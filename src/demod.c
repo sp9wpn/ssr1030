@@ -119,6 +119,22 @@ static void decode_modes(struct demod *d, struct interrog *it, double p6lead, do
         if (c < best) { best = c; best_t = exp_sync + o; }
     }
     it->sync = best;
+
+    /* P5 (Mode S SLS) overlaps the sync reversal. P6 flips phase there, P5
+     * does not: with z1/z2 the mean samples just before/after the reversal,
+     * P5 = |z1 + z2| / 2 and P6 = |z1 - z2| / 2. Uses the nominal sync when
+     * a strong P5 masks the reversal. */
+    {
+        double ts = best > -0.5f ? exp_sync : best_t;
+        int a0 = (int)lround(0.125 * d->spus), a1 = (int)lround(0.375 * d->spus);
+        if (a1 <= a0) a1 = a0 + 1;
+        float complex z1 = 0, z2 = 0;
+        uint64_t c = (uint64_t)llround(ts);
+        for (int k = a0; k < a1; k++) { z1 += Z(d, c - k); z2 += Z(d, c + k); }
+        z1 /= (a1 - a0); z2 /= (a1 - a0);
+        float p5 = cabsf(z1 + z2) / 2;
+        it->p5_db = p5 >= d->thr ? dbfs(p5) : NAN;     /* absolute here, made relative to P1 by the caller */
+    }
     if (best > -0.5f) {
         it->kind = K_S_NOSYNC;
         it->sidelobe = true;
@@ -211,6 +227,7 @@ static void match(struct demod *d, uint64_t i)
     struct interrog it;
     memset(&it, 0, sizeof(it));
     it.p2_db = NAN;
+    it.p5_db = NAN;
 
     /* --- Mode S: P1, P2 @2.0, P6 @3.5 --- */
     int j2 = find_at(d, i, 2.0, 0.2, true);
@@ -233,6 +250,7 @@ static void match(struct demod *d, uint64_t i)
                 struct pulse *p2 = &d->q[(i + j2) & QMASK];
                 it.p2_db = 20.0f * log10f(p2->amp / p1->amp);
                 decode_modes(d, &it, p6->lead, w6);
+                if (!isnan(it.p5_db)) it.p5_db -= dbfs(p1->amp);
                 p1->used = p2->used = true;
                 for (uint64_t k = i + j6; k <= last; k++) d->q[k & QMASK].used = true;
                 emit(d, &it, p1);

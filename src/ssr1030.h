@@ -37,6 +37,7 @@ struct interrog {
     int kind;
     float amp_db;       /* P1 amplitude, dBFS */
     float p2_db;        /* P2 - P1 in dB; NAN when no P2 */
+    float p5_db;        /* Mode S: P5 - P1 in dB; NAN when no P5 detected */
     float p4_width;     /* us, 0 when none */
     bool s1;            /* whisper-shout S1 pulse 2 us before P1 */
     bool sidelobe;      /* P2 >= P1 (A/C) or no sync reversal (S) */

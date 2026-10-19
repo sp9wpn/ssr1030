@@ -145,10 +145,10 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 `b` switches the whole screen to the latest beam pass of the main radar, one row per query in time order:
 
 ```
-  -2172.92 ms  S-sls                  -16.5 ░░░░░░░░░░░░
-    -36.42 ms  setAlt       4A2182     -9.1 █████████████████████████████
-    -23.35 ms  A                        1.2 ███████████████████████████████████████████████████████
-    +47.23 ms  AA                     -20.1 ▒▒▒▒
+   -262.58 ms  AA                     -18.5 ░░░░░░░           P2
+    -36.42 ms  setAlt       4A2182     -9.1 ████████████P5█████████████████
+    -23.35 ms  A                        1.2 ██P2█████████████████████████████████████████████████████
+    +47.23 ms  AA                     -20.1 ▒▒▒
 ```
 
 - **Each row:** time relative to the middle of the beam pass, query token (12 characters), target (8 characters: callsign when known, else hex address), amplitude in dBFS, and a bar whose length is the amplitude.
@@ -156,6 +156,9 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
   - `█` in-beam query
   - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
   - `▒` other weak query that is not SLS
+- **SLS pulses:** `P2` (A/C) and `P5` (Mode S) are drawn at the column matching their level. They appear inside the bar when weaker than P1, and after the bar end when stronger, which is what suppresses the transponder.
+  - P5 is measured at the sync phase reversal. P6 flips phase there but P5 does not, so with z1/z2 the samples just before and after it, P5 = |z1+z2|/2 and P6 = |z1−z2|/2. This also works when a strong P5 masks the sync (`S-sls`).
+  - In Mode S, P2 is part of the preamble, so it is not marked.
 - **Time range:**
   - Sidelobes are shown from 60 % of a rotation before the pass to 60 % of a rotation after, so neighbouring passes overlap. Before the rotation is known, ±2.4 s is used.
   - Weak queries are shown only within one dwell time (30–200 ms).
@@ -204,7 +207,7 @@ The interleaving statistics use the same tokens, without the target numbers.
 
 ## Log columns
 
-`t_s utc kind uf amp_dbfs gain_db rx_db p2_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds sync quality hex`
+`t_s utc kind uf amp_dbfs gain_db rx_db p2_rel_db p5_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds sync quality hex`
 
 - `burst` is -1 outside a main-beam burst.
 - `radar` is the attributed radar code, or `-` when unknown.

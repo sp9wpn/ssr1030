@@ -11,7 +11,7 @@ int output_open(const char *path, char sep)
     out = fopen(path, "w");
     if (!out) return -1;
     osep = sep;
-    const char *cols[] = { "t_s", "utc", "kind", "uf", "amp_dbfs", "gain_db", "rx_db", "p2_rel_db", "p4_us",
+    const char *cols[] = { "t_s", "utc", "kind", "uf", "amp_dbfs", "gain_db", "rx_db", "p2_rel_db", "p5_rel_db", "p4_us",
                            "s1", "sidelobe", "tcas", "burst", "radar", "addr", "callsign", "ii_si", "pr", "rr",
                            "di", "bds", "sync", "quality", "hex" };
     for (size_t k = 0; k < sizeof(cols) / sizeof(cols[0]); k++)
@@ -57,6 +57,7 @@ void output_write(const struct interrog *it, double start_epoch)
             kind_name(it->kind), s, kind_is_modes(it->kind) ? it->uf : -1, s, it->amp_db, s,
             it->gain_db, s, it->amp_db - it->gain_db, s);
     if (isnan(it->p2_db)) fprintf(out, "-%c", s); else fprintf(out, "%.1f%c", it->p2_db, s);
+    if (isnan(it->p5_db)) fprintf(out, "-%c", s); else fprintf(out, "%.1f%c", it->p5_db, s);
     fprintf(out, "%.2f%c%d%c%d%c%d%c%d%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%.2f%c%.2f%c%s\n",
             it->p4_width, s, it->s1, s, it->sidelobe, s, it->tcas, s, it->burst, s, radar, s, addr, s,
             cs, s, iisi, s, pr, s, rr, s, di, s, bds, s, it->sync, s, it->quality, s, hex);
@@ -72,8 +73,9 @@ void print_interrog_line(FILE *f, const struct interrog *it)
 {
     char desc[160] = "";
     if (kind_is_modes(it->kind) && it->kind != K_S_NOSYNC) modes_describe(it, desc, sizeof(desc));
-    char p2[16] = "";
-    if (!isnan(it->p2_db)) snprintf(p2, sizeof(p2), "P2%+.0fdB", it->p2_db);
+    char p2[24] = "";
+    if (!isnan(it->p2_db) && !kind_is_modes(it->kind)) snprintf(p2, sizeof(p2), "P2%+.0fdB", it->p2_db);
+    else if (!isnan(it->p5_db)) snprintf(p2, sizeof(p2), "P5%+.0fdB", it->p5_db);
     char q[12] = "";
     if (kind_is_modes(it->kind) && it->kind != K_S_NOSYNC) snprintf(q, sizeof(q), "q%.2f ", it->quality);
     char rc[8];
