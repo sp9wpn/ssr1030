@@ -315,7 +315,7 @@ static void build_filters(char *buf, size_t n)
         o += snprintf(buf + o, n - o, "radar %s  ", rc);
     }
     if (opt.acfg.modes_only) o += snprintf(buf + o, n - o, "Mode S only  ");
-    if (opt.acfg.ac_only) o += snprintf(buf + o, n - o, "A/C-only all-calls only  ");
+    if (opt.acfg.ac_only) o += snprintf(buf + o, n - o, "plain A/C only  ");
     if (opt.acfg.rollcall_only) o += snprintf(buf + o, n - o, "roll-calls only  ");
     if (opt.acfg.nac) {
         char l[160];
@@ -501,8 +501,8 @@ static void usage(void)
 "  -r, --radar CODE       keep only one radar: SI1-63 or II0-15; A/C interrogations are\n"
 "                         attributed via the beam burst or the preceding UF11, else dropped\n"
 "  -S, --modes-only       drop Mode A/C and intermode (A/C-only, A/C/S all-call) interrogations\n"
-"  -C, --ac-only          keep only A/C-only all-calls (tokens A / C, short P4); drops Mode S,\n"
-"                         plain Mode A/C and A/C/S all-calls (not with -S, -R or -A)\n"
+"  -C, --ac-only          keep only plain Mode A/C (tokens AA / CC, no P4) as sent by older SSR\n"
+"                         radars; drops Mode S and all intermode all-calls (not with -S, -R or -A)\n"
 "  -R, --rollcall-only    keep only interrogations addressed to an aircraft (UF4/5/20/21/24/19):\n"
 "                         drops UF11 and A/C/intermode all-calls and plain Mode A/C\n"
 "  -A, --aircraft LIST    keep only interrogations addressed to these aircraft: up to 16 hex\n"
@@ -612,7 +612,7 @@ int main(int argc, char **argv)
     }
     if (opt.fs < 8e6) { fprintf(stderr, "sample rate must be >= 8e6 for Mode S DPSK\n"); return 1; }
     if (opt.acfg.ac_only && (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.nac)) {
-        fprintf(stderr, "-C (A/C-only all-calls) cannot be combined with -S, -R or -A: nothing would pass\n");
+        fprintf(stderr, "-C (plain A/C only) cannot be combined with -S, -R or -A: nothing would pass\n");
         return 1;
     }
     bool live = opt.file == NULL;
