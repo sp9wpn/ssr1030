@@ -243,11 +243,11 @@ void ac_list_str(const struct analysis_cfg *c, bool resolved, char *buf, size_t 
     for (int k = 0; k < c->nac && o + 1 < n; k++) {
         const struct ac_sel *e = &c->ac[k];
         const char *sep = k ? "," : "";
-        if (e->addr >= 0) o += snprintf(buf + o, n - o, "%s%06llX", sep, (unsigned long long)e->addr);
+        if (e->addr >= 0) o += snprintf(buf + o, n - o, "%s%06llx", sep, (unsigned long long)e->addr);
         else if (!resolved) o += snprintf(buf + o, n - o, "%s%s", sep, e->cs);
         else {
             int64_t a = cs_find(e->cs);
-            if (a >= 0) o += snprintf(buf + o, n - o, "%s%s=%06llX", sep, e->cs, (unsigned long long)a);
+            if (a >= 0) o += snprintf(buf + o, n - o, "%s%s=%06llx", sep, e->cs, (unsigned long long)a);
             else o += snprintf(buf + o, n - o, "%s%s(?)", sep, e->cs);
         }
     }

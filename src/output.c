@@ -36,11 +36,11 @@ void output_write(const struct interrog *it, double start_epoch)
     radar_code_str(it->radar, radar, sizeof(radar));
     if (radar[0] == '?') snprintf(radar, sizeof(radar), "-");
     if (kind_is_modes(it->kind) && it->kind < K_S_NOSYNC) {
-        snprintf(addr, sizeof(addr), "%06X", it->addr);
+        snprintf(addr, sizeof(addr), "%06x", it->addr);
         const char *c = cs_lookup(it->addr);
         if (c) snprintf(cs, sizeof(cs), "%s", c);
         int o = 0;
-        for (int k = 0; k < it->nbits / 8; k++) o += snprintf(hex + o, sizeof(hex) - o, "%02X", it->msg[k]);
+        for (int k = 0; k < it->nbits / 8; k++) o += snprintf(hex + o, sizeof(hex) - o, "%02x", it->msg[k]);
         if (it->uf == 11) {
             int si, c = modes_iisi(it->msg, &si);
             snprintf(iisi, sizeof(iisi), "%s%d", si ? "SI" : "II", c);

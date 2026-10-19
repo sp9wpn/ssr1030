@@ -26,8 +26,8 @@ make
 ./ssr1030 -B                       # learn callsigns from ADS-B (1090) windows (kept in memory)
 ./ssr1030 -r SI17 -R               # only roll-calls of SI17 (no all-calls)
 ./ssr1030 -C                       # only plain Mode A/C (older SSR radars)
-./ssr1030 -A 48AF01                # only interrogations addressed to one aircraft
-./ssr1030 -A 48AF01,LOT3KM,DLH123  # ... or to any of several
+./ssr1030 -A 48af01                # only interrogations addressed to one aircraft
+./ssr1030 -A 48af01,LOT3KM,DLH123  # ... or to any of several
 ./ssr1030 -A LOT3KM -B             # same, by callsign
 ./ssr1030 --adsblol 52.23,21.01    # preload callsigns of aircraft within 150 NM from adsb.lol
 ```
@@ -45,8 +45,9 @@ These apply to statistics, bursts, the log and `--list`. TCAS stays a separate s
 - `-C, --ac-only`: keeps only plain Mode A/C (tokens `AA`/`CC`, no P4), as sent by older SSR radars. It drops Mode S and all intermode all-calls (`A`/`C`, `As`/`Cs`). It cannot be combined with `-S`, `-R` or `-A`.
 - `-R, --rollcall-only`: keeps only interrogations addressed to an aircraft (UF4/5/20/21/24/19). It drops UF11 `S`, all intermode all-calls and plain Mode A/C.
 - `-A, --aircraft LIST`: keeps only interrogations addressed to the listed aircraft (UF0/4/5/16/19/20/21/24).
-  - `LIST` holds up to 16 entries separated by commas, spaces or semicolons, for example `-A 48AF01,LOT3KM,DLH123`.
+  - `LIST` holds up to 16 entries separated by commas, spaces or semicolons, for example `-A 48af01,LOT3KM,DLH123`.
   - Each entry is 6 hex digits or a callsign. Use `cs:` to force a callsign that looks like hex.
+  - Input is case-insensitive. Output always shows hex addresses in lower case and callsigns in upper case.
   - A callsign resolves once the callsign table knows it. Until then the summary shows it as `LOT3KM(?)`.
 
 Burst detection still uses all interrogations, because the beam is physical.
@@ -146,7 +147,7 @@ Mode S fields decoded:
 
 Uplink AP = parity XOR high24(A(x)·G(x)) (Gertz, MIT LL ATC-117).
 So A = quotient of (parity XOR AP)·x²⁴ / G.
-This was checked on air: UF11 and UF16 broadcasts decode to `FFFFFF`, and roll-calls decode to real ICAO addresses.
+This was checked on air: UF11 and UF16 broadcasts decode to `ffffff`, and roll-calls decode to real ICAO addresses.
 
 ### Bit timing
 
@@ -158,7 +159,7 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 
 ```
    -262.58 ms  AA                     -18.5 ░░░░░░░           P2
-    -36.42 ms  selAlt       4A2182     -9.1 ████████████P5█████████████████
+    -36.42 ms  selAlt       4a2182     -9.1 ████████████P5█████████████████
     -23.35 ms  A                        1.2 ██P2█████████████████████████████████████████████████████
     +47.23 ms  AA                     -20.1 ▒▒▒
 ```

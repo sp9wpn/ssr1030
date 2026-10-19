@@ -53,7 +53,7 @@ const char *ac_name(uint32_t a)
     const char *c = cs_lookup(a);
     if (c) return c;
     char *b = bufs[n++ % 8];
-    snprintf(b, 9, "%06X", a & 0xFFFFFF);
+    snprintf(b, 9, "%06x", a & 0xFFFFFF);
     return b;
 }
 
@@ -77,10 +77,14 @@ int64_t cs_find(const char *callsign)
 int cs_count(void) { return ncs; }
 unsigned cs_version(void) { return cs_ver; }
 
-static void cs_set(uint32_t a, const char *cs, double when)
+static void cs_set(uint32_t a, const char *cs_in, double when)
 {
     struct cs_entry *e = cs_slot(a, true);
     if (!e) return;
+    char cs[9];                                   /* callsigns are always upper case */
+    int k = 0;
+    for (; k < 8 && cs_in[k]; k++) cs[k] = (cs_in[k] >= 'a' && cs_in[k] <= 'z') ? cs_in[k] - 32 : cs_in[k];
+    cs[k] = 0;
     if (strcmp(e->cs, cs)) {
         if (!e->cs[0]) ncs++;
         snprintf(e->cs, sizeof(e->cs), "%s", cs);
@@ -119,7 +123,7 @@ int cs_save(const char *path)
     FILE *f = fopen(tmp, "w");
     if (!f) return -1;
     for (int k = 0; k < CS_HASH; k++)
-        if (tab[k].used && tab[k].cs[0]) fprintf(f, "%06X %s %.0f\n", tab[k].addr, tab[k].cs, tab[k].last);
+        if (tab[k].used && tab[k].cs[0]) fprintf(f, "%06x %s %.0f\n", tab[k].addr, tab[k].cs, tab[k].last);
     fclose(f);
     return rename(tmp, path);
 }

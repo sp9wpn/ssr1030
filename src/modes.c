@@ -123,7 +123,7 @@ static int hexmsg(const struct interrog *it, char *b, size_t n)
 {
     int o = 0;
     for (int k = 0; k < it->nbits / 8 && (size_t)o + 3 < n; k++)
-        o += snprintf(b + o, n - o, "%02X", it->msg[k]);
+        o += snprintf(b + o, n - o, "%02x", it->msg[k]);
     return o;
 }
 
@@ -159,7 +159,7 @@ void modes_describe(const struct interrog *it, char *buf, size_t len)
         break;
     }
     case 0: case 16:
-        o = snprintf(buf, len, "%-8s RL=%u AQ=%u", it->addr == 0xFFFFFF ? "FFFFFF" : ac_name(it->addr),
+        o = snprintf(buf, len, "%-8s RL=%u AQ=%u", it->addr == 0xFFFFFF ? "ffffff" : ac_name(it->addr),
                      getbits(m, 9, 9), getbits(m, 14, 14));
         break;
     case 24:
