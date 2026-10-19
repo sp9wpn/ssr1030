@@ -74,11 +74,21 @@ static int tbl_w(int g)
     return w > 6 ? w : 6;
 }
 
+static void draw_status_line(const struct run_info *ri, bool last_row);
+
+void display_status_only(const struct run_info *ri)
+{
+    printf("\033[%d;1H", term_rows());
+    draw_status_line(ri, true);
+    fflush(stdout);
+}
+
 /* bottom line: filter input, last command result, or key help. On the last
  * screen row it must not end with a newline, or the terminal scrolls. */
 static void draw_status_line(const struct run_info *ri, bool last_row)
 {
     const char *end = last_row ? "\033[K" R : EL;
+    if (ri->frozen) fputs("\033[1;7m FROZEN (F) \033[0m ", stdout);
     if (ri->cmd_mode)
         printf(B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R "%s",
                ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd, end);
@@ -87,9 +97,9 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
                R "%s", ri->cmd_msg, end);
     else if (ri->graph)
         printf(DIM "keys: b dashboard  \u2191\u2193 PgUp PgDn Home End scroll  r radar filter  a aircraft filter  "
-               "S Mode S only  R roll-calls only  q quit" R "%s", end);
+               "S Mode S only  R roll-calls only  F freeze  q quit" R "%s", end);
     else printf(DIM "keys: q quit  +/- VGA  L/l LNA  p RF amp (manual)  g auto gain  r radar filter  a aircraft filter  "
-                "S Mode S only  R roll-calls only  b burst graph  x reset stats" R "%s", end);
+                "S Mode S only  R roll-calls only  b burst graph  F freeze  x reset stats" R "%s", end);
 }
 
 /* ---------- burst graph screen ('b') ----------
@@ -100,6 +110,7 @@ static const char *gp_char(int cls) { return cls == GP_BEAM ? "\u2588" : cls == 
 static const char *gp_color(int cls) { return cls == GP_BEAM ? GRN : cls == GP_SIDE ? YEL : DIM; }
 
 static int g_scroll, g_burst = -1, g_page = 20, g_key;
+static bool frozen_view;
 
 void display_graph_key(int key)
 {
@@ -108,7 +119,16 @@ void display_graph_key(int key)
 
 static void draw_graph(int cols, int rows)
 {
-    const struct burst *b = analysis_graph_burst();
+    /* frozen: keep showing the pinned burst while it is still in the history */
+    static int pin = -1;
+    const struct burst *b = NULL;
+    if (frozen_view && pin >= 0) {
+        int lim = AS.nhist < BURST_HIST ? AS.nhist : BURST_HIST;
+        for (int i = 0; i < lim && !b; i++)
+            if (AS.hist[(AS.nhist - 1 - i) % BURST_HIST].id == pin) b = &AS.hist[(AS.nhist - 1 - i) % BURST_HIST];
+    }
+    if (!b) b = analysis_graph_burst();
+    pin = frozen_view && b ? b->id : -1;
     if (!b || !b->ngp) {
         printf(B "Burst graph" R DIM "  waiting for a main-beam burst   b back" R EL);
         return;
@@ -302,6 +322,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     bool clipping = now - last_clip_t < win;
     bool weak = !clipping && span > 0.8 * win && peak_w - st.noise_dbfs < 25;
 
+    frozen_view = ri->frozen;
     if (ri->graph) {
         int rows = term_rows();
         draw_graph(cols, rows - 1);           /* last row: status / filter input */

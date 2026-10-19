@@ -354,6 +354,7 @@ static void build_filters(char *buf, size_t n)
 
 /* ---------- filter input line ('r' radar, 'a' aircraft; empty clears) ---------- */
 static bool show_graph;               /* 'b': burst graph screen */
+static bool frozen;                   /* 'F': freeze the screen */
 static char edit_kind;                /* 'r', 'a' or 0 when not editing */
 static char cmd_buf[160];
 static int cmd_len;
@@ -488,6 +489,11 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             manual = false;
             break;
         case 'b': case 'B': show_graph = !show_graph; manual = false; break;
+        case 'F':
+            frozen = !frozen;
+            snprintf(cmd_msg, sizeof(cmd_msg), frozen ? "screen frozen, data collection continues" : "screen live again");
+            manual = false;
+            break;
         case 'x': case 'X':
             analysis_init(&opt.acfg);
             analysis_set_gain(gain_total(cur_gain));
@@ -502,6 +508,7 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
         }
     }
     ri->graph = show_graph;
+    ri->frozen = frozen;
     ri->cmd_mode = edit_kind != 0;
     ri->cmd_kind = edit_kind;
     snprintf(ri->cmd, sizeof(ri->cmd), "%.*s", cmd_len, cmd_buf);
@@ -564,7 +571,8 @@ static void usage(void)
 "  -q, --quiet            no live output; summary at exit\n\n"
 "Keys (dashboard): q quit, +/- VGA, L/l LNA, p RF amp (any of these: manual gain), g auto gain,\n"
 "                  r radar filter, a aircraft filter (type it, Enter; empty clears),\n"
-"                  S Mode S only on/off, R roll-calls only on/off, b burst graph, x reset statistics\n");
+"                  S Mode S only on/off, R roll-calls only on/off, b burst graph, F freeze screen,\n"
+"                  x reset statistics\n");
 }
 
 int main(int argc, char **argv)
@@ -825,7 +833,10 @@ int main(int argc, char **argv)
             ri.gain_age = gain_change_t >= 0 ? now - gain_change_t : -1;
             ri.gain_delta = gain_delta;
             snprintf(ri.gain_why, sizeof(ri.gain_why), "%s", gain_why);
-            if (dash) display_render(&ri, now, d, drops);
+            /* frozen: the chart (pinned burst) still redraws for scrolling; the
+             * dashboard keeps its picture and only the bottom row is updated */
+            if (dash && (!frozen || show_graph)) display_render(&ri, now, d, drops);
+            else if (dash && kred) display_status_only(&ri);
             if (opt.list) fflush(stdout);
         }
     }

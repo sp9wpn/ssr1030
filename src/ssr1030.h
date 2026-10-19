@@ -168,6 +168,7 @@ struct run_info {
     char filters[256];
     bool agc;              /* automatic gain */
     bool graph;            /* burst graph screen instead of the dashboard */
+    bool frozen;           /* 'F': screen frozen, data collection continues */
     bool cmd_mode;         /* filter input line open */
     char cmd_kind;         /* 'r' radar or 'a' aircraft */
     char cmd[160];
@@ -179,7 +180,8 @@ struct run_info {
 void display_init(void);
 void display_restore(void);
 void display_render(const struct run_info *ri, double now, struct demod *d, uint64_t drops);
-void display_graph_key(int key);   /* 'U' 'D' 'P' 'N' 'H' 'E': scroll the burst graph */
+void display_graph_key(int key);
+void display_status_only(const struct run_info *ri);   /* frozen dashboard: redraw the bottom row only */   /* 'U' 'D' 'P' 'N' 'H' 'E': scroll the burst graph */
 
 /* ---- output.c ---- */
 int output_open(const char *path, char sep);
