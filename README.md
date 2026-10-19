@@ -151,7 +151,7 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
     +47.23 ms  AA                     -20.1 ▒▒▒
 ```
 
-- **Each row:** time relative to the middle of the beam pass, query token (12 characters), target (8 characters: callsign when known, else hex address), amplitude in dBFS, and a bar whose length is the amplitude.
+- **Each row:** time relative to the middle of the beam pass, query token (12 characters), target (8 characters: callsign when known, else hex address), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
 - **Bar character:**
   - `█` in-beam query
   - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
@@ -159,6 +159,9 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 - **SLS pulses:** `P2` (A/C) and `P5` (Mode S) are drawn at the column matching their level. They appear inside the bar when weaker than P1, and after the bar end when stronger, which is what suppresses the transponder.
   - P5 is measured at the sync phase reversal. P6 flips phase there but P5 does not, so with z1/z2 the samples just before and after it, P5 = |z1+z2|/2 and P6 = |z1−z2|/2. This also works when a strong P5 masks the sync (`S-sls`).
   - In Mode S, P2 is part of the preamble, so it is not marked.
+- **Sidelobe Mode S is decoded.** P5 ≥ P6 means a transponder would not reply (the query is not for us), but P5 covers only the sync reversal and the data chips after it are intact.
+  - The bit timing is recovered within ±half a chip of the nominal sync, and the query is shown with its real type and target plus `sls`.
+  - These queries carry their radar's SI/II code, so sidelobes are attributed to the radar too.
 - **Time range:**
   - Sidelobes are shown from 60 % of a rotation before the pass to 60 % of a rotation after, so neighbouring passes overlap. Before the rotation is known, ±2.4 s is used.
   - Weak queries are shown only within one dwell time (30–200 ms).
@@ -199,7 +202,7 @@ They are left out of all radar analysis.
 | `cap` `gicb` `pos` `met` `ra` `aicb` … | BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
 | `S-msg` | Comm-A UF20/21 (`S-msg/hdgSpd` = also requests BDS 6,0) |
 | `S-elm` `S-mil` | UF24 ELM, UF19 |
-| `S-sls` | Mode S sidelobe: P5 at least as strong as P6, so a transponder would not decode it (P5 always measured) |
+| `S-sls` | Mode S sidelobe (P5 ≥ P6) whose bits could not be recovered. Normally sidelobe Mode S is fully decoded and shown with its own token and the SLS flag |
 | `S-grb` | Mode S with no sync reversal and no P5 (garbled) |
 
 Roll-calls carry the number of their target, for example `alt/1` or `setAlt/2#2`.

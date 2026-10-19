@@ -131,14 +131,14 @@ static void draw_graph(int cols, int rows)
 
     /* bar width: screen minus the row prefix, 5 columns spare */
     char probe[96];
-    int plen = snprintf(probe, sizeof(probe), "%+10.2f ms  %-12.12s %-8.8s %6.1f ", -9999.99, "", "", -99.9);
+    int plen = snprintf(probe, sizeof(probe), "%+10.2f ms  %-12.12s %-8.8s %-3s %6.1f ", -9999.99, "", "", "", -99.9);
     int W = cols - plen - 5;
     if (W < 10) W = 10;
     for (int i = g_scroll; i < last; i++) {
         const struct gpoint *g = &b->gp[i];
         char ts[24];
         seq_token_str(g->tok, ts, sizeof(ts));
-        const char *tg = g->ka != NO_TARGET ? ac_name(b->addrs[g->ka]) : "";
+        const char *tg = g->addr != NO_ADDR ? ac_name(g->addr) : "";
         int len = (int)lroundf((g->amp - ybot) / (ytop - ybot) * W);
         if (len < 1) len = 1;
         if (len > W) len = W;
@@ -153,8 +153,10 @@ static void draw_graph(int cols, int rows)
             if (mpos < 2) mpos = 2;
             if (mpos > W) mpos = W;
         }
-        /* fixed-width fields: query 12 (longest token, e.g. S-msg/hdgSpd), target 8 (callsign or hex) */
-        printf("%s%+10.2f ms  %-12.12s %-8.8s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), ts, tg, g->amp);
+        /* fixed-width fields: query 12 (longest token, e.g. S-msg/hdgSpd), target 8 (callsign or hex),
+         * "sls" when the query reached us through a sidelobe */
+        printf("%s%+10.2f ms  %-12.12s %-8.8s %-3s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), ts, tg,
+               g->cls == GP_SIDE ? "sls" : "", g->amp);
         fputs(R, stdout);
         int end = mpos > len ? mpos : len;
         for (int k = 0; k < end; k++) {

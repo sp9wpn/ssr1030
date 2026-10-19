@@ -162,23 +162,45 @@ static void decode_modes(struct demod *d, struct interrog *it, double p6lead, do
             if (a5 > p5) { p5 = a5; p6 = a6; }
         }
         it->p5_db = p5 >= d->thr ? dbfs(p5) : NAN;     /* absolute here, made relative to P1 by the caller */
-        /* transponder rule: P5 at least as strong as P6 suppresses decoding */
-        if (!isnan(it->p5_db) && p5 >= p6) best = 2;
-    }
-    if (best > -0.5f) {
-        /* no sync: a stronger P5 (sidelobe) masks it, or the signal is garbled */
-        it->kind = isnan(it->p5_db) ? K_S_GARBLE : K_S_NOSYNC;
-        it->sidelobe = !isnan(it->p5_db);
-        return;
+        /* transponder rule: P5 at least as strong as P6 = sidelobe; a
+         * transponder would not reply, but the data chips after P5 are intact */
+        if (!isnan(it->p5_db) && p5 >= p6) { it->sidelobe = true; best = 2; }
     }
 
     int len_class = 0;
     if (p6width > 14.5 && p6width < 18.0) len_class = 56;
     else if (p6width > 28.5 && p6width < 32.5) len_class = 112;
+    int maxbits = (p6width > 18.0) ? 112 : 56;
+
+    if (best > -0.5f) {
+        if (isnan(it->p5_db)) {             /* no sync and no P5: garbled */
+            it->kind = K_S_GARBLE;
+            return;
+        }
+        /* Sync masked by P5: recover the bit timing from the data chips. P5
+         * covers only sync +-0.4 us. A shift by a whole chip decodes just as
+         * cleanly, so search only +-half a chip around the nominal sync (the
+         * P6 leading edge, before P5 starts, fixes it that well) and keep the
+         * offset whose chips (from the 2nd bit on) give the most confident
+         * decisions. */
+        it->sidelobe = true;
+        int nb = maxbits < 56 ? maxbits : 56;
+        int half = (int)(chip / 2);
+        float score = 0;
+        for (int o = -half; o <= half; o++) {
+            float sum = 0;
+            for (int k = 1; k < nb; k++) sum += fabsf(reversal_corr(d, exp_sync + o + (k + 2) * chip, h, NULL));
+            sum /= nb - 1;
+            if (sum > score) { score = sum; best_t = exp_sync + o; }
+        }
+        if (score < 0.6f) {                 /* chips not clean enough to trust */
+            it->kind = K_S_NOSYNC;
+            return;
+        }
+    }
 
     /* Data reversals occur N x 0.25 us after sync with N >= 2 (Annex 10
-     * Vol IV 3.1.2.1.5.2.3), so data bit k sits at sync + (k + 1) chips. */
-    int maxbits = (p6width > 18.0) ? 112 : 56;
+     * Vol IV 3.1.2.1.5.2.3), so data bit k (0-based) sits at sync + (k + 2) chips. */
     float conf[MODES_MAX_BITS];
     memset(it->msg, 0, sizeof(it->msg));
     for (int k = 0; k < maxbits; k++) {

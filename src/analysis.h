@@ -11,6 +11,7 @@
 #define RECENT_N     8
 #define NCODES       80          /* radar codes: II 0-15, SI 16+1..63 */
 #define NO_TARGET    255
+#define NO_ADDR      0xFFFFFFFFu
 #define TR_N         1024        /* distinct token transitions tracked */
 
 /* query-type groups used in per-burst tables; every interrogation is in exactly one */
@@ -22,6 +23,7 @@ struct gpoint {
     double t;               /* stream time, s */
     float amp;              /* dBFS */
     float p2, p5;           /* SLS pulse levels, dBFS; NAN when not detected */
+    uint32_t addr;          /* addressed aircraft, NO_ADDR when none */
     uint16_t tok;           /* seq_token */
     uint8_t ka;             /* target index, NO_TARGET when none */
     uint8_t cls;            /* GP_BEAM, GP_SIDE, GP_WEAK */
