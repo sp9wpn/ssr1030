@@ -45,7 +45,7 @@ struct burst {
     uint32_t addrs[64];
     double period;          /* time since previous burst of the same radar */
     float gain;             /* nominal receiver gain at commit */
-    struct gpoint gp[SEQ_MAX];  /* beam queries + sidelobes within half a rotation + weak nearby */
+    struct gpoint gp[SEQ_MAX];  /* beam queries + sidelobes within 60 % of a rotation + weak nearby */
     int ngp, nside, nweak;
 };
 

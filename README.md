@@ -143,19 +143,19 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 `b` switches the whole screen to the latest beam pass of the main radar, one row per query in time order:
 
 ```
-    -36.42 ms  setAlt/2        -9.1 ███████████████████████████████████████████
+    -36.42 ms  setAlt/4A2182        -9.1 ███████████████████████████████████████████
     -12.51 ms  S                2.5 ███████████████████████████████████████████████████████████
     +47.23 ms  AA             -20.1 ▒▒▒▒▒
   +1790.98 ms  C              -15.9 ░░░░░░░░░░░░░░░░░░░
 ```
 
-- **Each row:** time relative to the middle of the beam pass, query token and target number (as in the burst sequence), amplitude in dBFS, and a bar whose length is the amplitude.
+- **Each row:** time relative to the middle of the beam pass, query token and target (callsign when known, else hex address), amplitude in dBFS, and a bar whose length is the amplitude.
 - **Bar character:**
   - `█` in-beam query
   - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
   - `▒` other weak query that is not SLS
 - **Time range:**
-  - Sidelobes are shown from half a rotation before the pass to half a rotation after. Before the rotation is known, ±2 s is used.
+  - Sidelobes are shown from 60 % of a rotation before the pass to 60 % of a rotation after, so neighbouring passes overlap. Before the rotation is known, ±2.4 s is used.
   - Weak queries are shown only within one dwell time (30–200 ms).
   - Rows keep being added as late sidelobes arrive.
 - **Scrolling:** ↑/↓ (or `j`/`k`), PgUp/PgDn, Home/End. A new burst opens just before its first beam query. `b` returns to the dashboard.

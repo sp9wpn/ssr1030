@@ -466,8 +466,8 @@ static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka
     graph_put(b, y->t, y->amp_db, seq_token(y), ka, cls);
 }
 
-/* Non-beam queries for the graph. Sidelobes are kept from half a rotation
- * before to half a rotation after a burst, other weak queries only within
+/* Non-beam queries for the graph. Sidelobes are kept from 60 % of a rotation
+ * before to 60 % of a rotation after a burst, other weak queries only within
  * one dwell. A ring holds the recent past; open post-windows collect the
  * queries that arrive after a burst was committed. */
 #define GRING 16384
@@ -497,13 +497,15 @@ static int cmp_gp(const void *x, const void *y)
     return (a > b) - (a < b);
 }
 
-static double half_rotation(int code)
+/* sidelobe shoulder shown on each side of a burst: 60 % of the rotation */
+#define SIDE_FRAC 0.6
+static double side_window(int code)
 {
     for (int r = 0; r < AS.nradars; r++)
         if (AS.radars[r].code == code && AS.radars[r].np)
-            return 0.5 * median_d(AS.radars[r].periods, AS.radars[r].np < 64 ? AS.radars[r].np : 64);
+            return SIDE_FRAC * median_d(AS.radars[r].periods, AS.radars[r].np < 64 ? AS.radars[r].np : 64);
     double rot = analysis_rotation();
-    return rot > 0 ? 0.5 * rot : 2.0;
+    return rot > 0 ? SIDE_FRAC * rot : 2.4;
 }
 
 /* before commit: add buffered non-beam queries preceding / inside the burst */
@@ -649,7 +651,7 @@ static void close_burst(void)
         double margin = o->t1 - o->t0;
         if (margin < 0.03) margin = 0.03;
         if (margin > 0.2) margin = 0.2;
-        double half = half_rotation(code);
+        double half = side_window(code);
         graph_context(&rec, o->t0, o->t1, margin, half);
         commit(&rec);
         /* keep collecting late queries for this burst; drop expired windows */
