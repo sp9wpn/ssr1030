@@ -355,6 +355,7 @@ static void build_filters(char *buf, size_t n)
 /* ---------- filter input line ('r' radar, 'a' aircraft; empty clears) ---------- */
 static bool show_graph;               /* 'b': burst graph screen */
 static bool frozen;                   /* 'F': freeze the screen */
+static bool force_full;               /* one full redraw (screen switched while frozen) */
 static char edit_kind;                /* 'r', 'a' or 0 when not editing */
 static char cmd_buf[160];
 static int cmd_len;
@@ -488,7 +489,7 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             apply_filters(ri, opt.acfg.rollcall_only ? "roll-calls only ON (all-calls dropped)" : "roll-calls only OFF");
             manual = false;
             break;
-        case 'b': case 'B': show_graph = !show_graph; manual = false; break;
+        case 'b': case 'B': show_graph = !show_graph; force_full = true; manual = false; break;
         case 'F':
             frozen = !frozen;
             snprintf(cmd_msg, sizeof(cmd_msg), frozen ? "screen frozen, data collection continues" : "screen live again");
@@ -835,8 +836,9 @@ int main(int argc, char **argv)
             snprintf(ri.gain_why, sizeof(ri.gain_why), "%s", gain_why);
             /* frozen: the chart (pinned burst) still redraws for scrolling; the
              * dashboard keeps its picture and only the bottom row is updated */
-            if (dash && (!frozen || show_graph)) display_render(&ri, now, d, drops);
+            if (dash && (!frozen || show_graph || force_full)) display_render(&ri, now, d, drops);
             else if (dash && kred) display_status_only(&ri);
+            force_full = false;
             if (opt.list) fflush(stdout);
         }
     }
