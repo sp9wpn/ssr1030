@@ -315,6 +315,7 @@ static void build_filters(char *buf, size_t n)
         o += snprintf(buf + o, n - o, "radar %s  ", rc);
     }
     if (opt.acfg.modes_only) o += snprintf(buf + o, n - o, "Mode S only  ");
+    if (opt.acfg.ac_only) o += snprintf(buf + o, n - o, "A/C only  ");
     if (opt.acfg.rollcall_only) o += snprintf(buf + o, n - o, "roll-calls only  ");
     if (opt.acfg.nac) {
         char l[160];
@@ -500,6 +501,8 @@ static void usage(void)
 "  -r, --radar CODE       keep only one radar: SI1-63 or II0-15; A/C interrogations are\n"
 "                         attributed via the beam burst or the preceding UF11, else dropped\n"
 "  -S, --modes-only       drop Mode A/C and intermode (A/C-only, A/C/S all-call) interrogations\n"
+"  -C, --ac-only          keep only classic Mode A/C: plain A/C and A/C-only, A/C/S all-calls\n"
+"                         (opposite of -S; not with -S, -R or -A)\n"
 "  -R, --rollcall-only    keep only interrogations addressed to an aircraft (UF4/5/20/21/24/19):\n"
 "                         drops UF11 and A/C/intermode all-calls and plain Mode A/C\n"
 "  -A, --aircraft LIST    keep only interrogations addressed to these aircraft: up to 16 hex\n"
@@ -546,14 +549,14 @@ int main(int argc, char **argv)
         { "member-db", 1, 0, 8 }, { "core-db", 1, 0, 9 }, { "log", 1, 0, 'o' }, { "space", 0, 0, 10 },
         { "list", 0, 0, 'L' }, { "tcas", 0, 0, 11 }, { "dashboard", 0, 0, 'd' }, { "quiet", 0, 0, 'q' },
         { "radar", 1, 0, 'r' }, { "modes-only", 0, 0, 'S' }, { "aircraft", 1, 0, 'A' },
-        { "rollcall-only", 0, 0, 'R' },
+        { "rollcall-only", 0, 0, 'R' }, { "ac-only", 0, 0, 'C' },
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
         { "no-auto-gain", 0, 0, 17 },
         { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
     };
     int c;
-    while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SRA:Bh", lo, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SCRA:Bh", lo, NULL)) != -1) {
         switch (c) {
         case 'f': opt.file = optarg; break;
         case 'w': opt.record = optarg; break;
@@ -583,6 +586,7 @@ int main(int argc, char **argv)
             break;
         case 'S': opt.acfg.modes_only = true; break;
         case 'R': opt.acfg.rollcall_only = true; break;
+        case 'C': opt.acfg.ac_only = true; break;
         case 'A':
             {
                 char bad[64];
@@ -607,6 +611,10 @@ int main(int argc, char **argv)
         }
     }
     if (opt.fs < 8e6) { fprintf(stderr, "sample rate must be >= 8e6 for Mode S DPSK\n"); return 1; }
+    if (opt.acfg.ac_only && (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.nac)) {
+        fprintf(stderr, "-C (A/C only) cannot be combined with -S, -R or -A: nothing would pass\n");
+        return 1;
+    }
     bool live = opt.file == NULL;
     bool dash = !opt.list && !opt.quiet && (live || opt.dashboard);
     if (opt.adsb && !live) { fprintf(stderr, "--adsb needs the HackRF; ignored in --file mode\n"); opt.adsb = false; }

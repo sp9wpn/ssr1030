@@ -25,6 +25,7 @@ make
 ./ssr1030 -r SI17 -S               # only radar SI17, Mode S interrogations only
 ./ssr1030 -B                       # learn callsigns from ADS-B (1090) windows (kept in memory)
 ./ssr1030 -r SI17 -R               # only roll-calls of SI17 (no all-calls)
+./ssr1030 -r SI17 -C               # only classic Mode A/C of SI17
 ./ssr1030 -A 48AF01                # only interrogations addressed to one aircraft
 ./ssr1030 -A 48AF01,LOT3KM,DLH123  # ... or to any of several
 ./ssr1030 -A LOT3KM -B             # same, by callsign
@@ -41,6 +42,7 @@ These apply to statistics, bursts, the log and `--list`. TCAS stays a separate s
   - Outside bursts, an all-call is attributed if a UF11 was sent less than 300 µs before it.
   - Anything left unattributed is dropped.
 - `-S, --modes-only`: drops plain Mode A/C and intermode (A/C-only and A/C/S all-calls).
+- `-C, --ac-only`: the opposite of `-S`. It keeps only classic Mode A/C interrogations: plain `AA`/`CC`, A/C-only all-calls `A`/`C`, and A/C/S all-calls `As`/`Cs`. It cannot be combined with `-S`, `-R` or `-A`.
 - `-R, --rollcall-only`: keeps only interrogations addressed to an aircraft (UF4/5/20/21/24/19). It drops UF11 `S`, all intermode all-calls and plain Mode A/C.
 - `-A, --aircraft LIST`: keeps only interrogations addressed to the listed aircraft (UF0/4/5/16/19/20/21/24).
   - `LIST` holds up to 16 entries separated by commas, spaces or semicolons, for example `-A 48AF01,LOT3KM,DLH123`.
