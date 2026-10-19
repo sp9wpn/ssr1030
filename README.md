@@ -60,17 +60,31 @@ Per-burst counts, sequences, dwell and rotation are computed only from interroga
 - **Preload:** `--adsblol LAT,LON` fills the table at startup with every aircraft within `--adsblol-radius` NM (default 150, API max 250) of that position, from the public [adsb.lol](https://api.adsb.lol) API (`/v2/lat/…/lon/…/dist/…`, via `curl`, no key needed). It sends the coordinates to adsb.lol and works with or without `-B` and in `--file` mode. If the request fails, the run continues without it.
 - **Table:** kept in memory only. Optionally, `--adsb-db PATH` loads it at start and saves it after each window (for example to a file in `/tmp`). That also lets `--file` replays show callsigns.
 
-Dashboard keys: `q` quit, `+`/`-` VGA ±2 dB, `L`/`l` LNA ±8 dB, `a` amp on/off, `r` reset statistics.
+Dashboard keys: `q` quit, `+`/`-` VGA ±2 dB, `L`/`l` LNA ±8 dB, `a` amp on/off (any of these switches to manual gain), `g` automatic gain on/off, `r` reset statistics.
 
 Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coincidences of unrelated pulses.
 
-Gain: the default is RF amp off, LNA 32, VGA 24. At 15 km from the radar the amp was needed earlier; switch it on with `-a 1` or the `a` key if the dashboard says `WEAK SIGNAL`.
-The dashboard shows the current HackRF settings (AMP, LNA, VGA, nominal gain, baseband filter).
-The level check covers the last max(20 s, 3 rotations), so every warning spans several beam passes:
-- `CLIPPING n s ago`: any clipping in that window.
-- `WEAK SIGNAL`: the strongest pulse is less than 25 dB above noise.
-- `level OK`: neither.
-Changing the gain restarts the level check.
+## Gain
+
+**Automatic gain is on by default** (`--no-auto-gain` turns it off, `g` toggles it).
+- **Target:** the beam peak of the main radar (`-r`, or the radar with the most bursts) is kept near −6 dBFS.
+  - Peak ≥ −2 dBFS, or clipping: the gain goes down at once.
+  - Peak < −14 dBFS on two passes in a row: the gain goes up.
+  - No beam pass for 10 s, or 2 rotations: the gain steps up by 4–12 dB while nothing strong is heard.
+- **Timing:** changes are made only right after a beam pass, never during one. The background level is shifted by the same amount, so burst detection is not disturbed.
+- **Stages:** the nominal gain (amp 11 dB + LNA + VGA) is split so that VGA stays ≥ 16 dB while LNA can move. The RF amp is used only above 80 dB, because near a radar it overloads first.
+- **Manual override:** pressing `+ - L l a` switches to manual gain.
+- **Starting point:** `-a/-l/-g` set the starting gain. The default is amp off, LNA 32, VGA 24.
+
+**ADS-B windows** run with extra gain (`--adsb-boost`, default +12 dB), because 1090 replies are usually weaker than the interrogations.
+The boost adapts after each window: clipping or frames above −3 dBFS lower it by 4 dB, and frames below −20 dBFS (or none at all) raise it by 4 dB.
+
+The dashboard shows the HackRF settings, the mode (AUTO/MANUAL), the ADS-B boost and the last gain change with its reason.
+The level check covers the last max(20 s, 3 rotations) and reports clipping, a weak signal (strongest pulse < 25 dB above noise), or OK.
+
+Because the gain changes, `amp_dbfs` alone is not comparable over time.
+The log has `gain_db` (nominal gain) and `rx_db` (= `amp_dbfs − gain_db`, a gain-independent relative level).
+The burst table shows the gain each burst was received with.
 If the dashboard shows `CLIPPING`, lower the gain.
 Close to the radar (a few km), start with `-l 16 -g 20`.
 
@@ -144,7 +158,7 @@ The interleaving statistics use the same tokens, without the target numbers.
 
 ## Log columns
 
-`t_s utc kind uf amp_dbfs p2_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds sync quality hex`
+`t_s utc kind uf amp_dbfs gain_db rx_db p2_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds sync quality hex`
 
 - `burst` is -1 outside a main-beam burst.
 - `radar` is the attributed radar code, or `-` when unknown.

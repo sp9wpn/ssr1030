@@ -135,9 +135,12 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     bool weak = !clipping && span > 0.8 * win && peak_w - st.noise_dbfs < 25;
 
     if (ri->live) {
-        printf("HackRF: %s  " B "AMP %s  LNA %d dB  VGA %d dB" R "  (nominal %d dB)  BB filter %.1f MHz",
+        printf("HackRF: %s  " B "AMP %s  LNA %d dB  VGA %d dB" R "  (nominal %d dB)  %s%s" R,
                ri->hw, ri->amp ? "on" : "off", ri->lna, ri->vga, (ri->amp ? 11 : 0) + ri->lna + ri->vga,
-               ri->bbw / 1e6);
+               ri->agc ? GRN "AUTO GAIN" : YEL "MANUAL GAIN ('g' = auto)", "");
+        if (ri->adsb) printf("  ADS-B +%d dB", ri->adsb_boost);
+        if (ri->gain_age >= 0)
+            printf(DIM "  last change %+d dB %.0f s ago (%s)" R, ri->gain_delta, ri->gain_age, ri->gain_why);
         fputs(EL, stdout);
     }
     printf("Signal: noise %.1f dBFS  thr %.1f  peak %s%.1f" R " (last %.0f s: %s%.1f" R ")  clip %s%.4f%%" R
@@ -147,7 +150,10 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
            (unsigned long)st.garbled);
     if (drops) printf("  " RED "USB drops %lu" R, (unsigned long)drops);
     fputs(EL, stdout);
-    if (clipping)
+    if (ri->agc && ri->live)
+        printf("  %s" R DIM "  auto gain keeps the main radar's beam peak near -6 dBFS (peak %.1f, clip %.4f%% over %.0f s)" R EL,
+               clipping ? RED "clipping seen" : (weak ? YEL "weak" : GRN "level OK"), peak_w, clip_w_pct, win);
+    else if (clipping)
         printf(RED B "  CLIPPING %.0f s ago" R RED " - lower gain: '-' VGA -2 dB, 'l' LNA -8 dB, 'a' amp off"
                "  (warning holds %.0f s)" R EL, now - last_clip_t, win);
     else if (weak)
@@ -247,14 +253,14 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     fputs(EL, stdout);
 
     /* recent bursts */
-    printf(B "%-5s %9s %-5s %7s %6s %5s %7s", "Burst", "t[s]", "radar", "dur ms", "peak", "n", "P[s]");
+    printf(B "%-5s %9s %-5s %7s %6s %4s %5s %7s", "Burst", "t[s]", "radar", "dur ms", "peak", "gain", "n", "P[s]");
     for (int g = 0; g < G_COUNT; g++) printf(" %6s", group_label(g));
     printf(R EL);
     int nb = AS.nhist < 8 ? AS.nhist : 8;
     for (int i = AS.nhist - nb; i < AS.nhist; i++) {
         struct burst *b = &AS.hist[i % BURST_HIST];
-        printf("#%-4d %9.3f %-4s%s %7.1f %6.1f %5d", b->id, b->t0, b->key, b->partial ? "*" : " ",
-               1e3 * (b->t1 - b->t0), b->peak, b->n);
+        printf("#%-4d %9.3f %-4s%s %7.1f %6.1f %4.0f %5d", b->id, b->t0, b->key, b->partial ? "*" : " ",
+               1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n);
         if (b->period > 0) printf(" %7.3f", b->period); else printf(" %7s", "-");
         for (int g = 0; g < G_COUNT; g++) {
             if (b->gcnt[g]) printf(" %6d", b->gcnt[g]);
@@ -298,7 +304,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         if ((int)strlen(buf) > cols - 1) buf[cols - 1] = 0;
         printf("%s" EL, buf);
     }
-    printf(DIM "keys: q quit  +/- VGA  L/l LNA  a amp  r reset stats" R EL);
+    printf(DIM "keys: q quit  +/- VGA  L/l LNA  a amp (manual)  g auto gain  r reset stats" R EL);
     fputs("\033[J", stdout);
     fflush(stdout);
 }

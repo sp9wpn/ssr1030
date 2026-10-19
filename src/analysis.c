@@ -173,6 +173,26 @@ double analysis_rotation(void)
 }
 
 double analysis_last_burst_end(void) { return AS.last_burst_end; }
+
+int analysis_main_code(void)
+{
+    if (AS.cfg.radar_sel >= 0) return AS.cfg.radar_sel;
+    struct radar *best = NULL;
+    for (int r = 0; r < AS.nradars; r++) {
+        struct radar *X = &AS.radars[r];
+        if (!best || (best->code < 0 && X->code >= 0) ||
+            ((X->code >= 0) == (best->code >= 0) && X->nbursts > best->nbursts)) best = X;
+    }
+    return best ? best->code : -2;
+}
+
+void analysis_set_gain(float g) { AS.gain_db = g; }
+
+void analysis_gain_shift(float delta)
+{
+    for (int k = 0; k < NBINS; k++) bins[k] += delta;
+    AS.bg_db += delta;
+}
 int64_t analysis_target_addr(void) { return AS.target; }
 
 /* ---------------- filters ---------------- */
@@ -396,6 +416,7 @@ static void commit(struct burst *b)
             if (gc[g] > r->cnt_max[g]) r->cnt_max[g] = gc[g];
         }
     }
+    b->gain = AS.gain_db;
     AS.hist[AS.nhist % BURST_HIST] = *b;
     AS.nhist++;
 }

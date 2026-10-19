@@ -43,6 +43,7 @@ struct interrog {
     bool tcas;          /* UF0/UF16/whisper-shout: counted, excluded from analysis */
     int burst;          /* burst id, -1 when not in a main-beam burst */
     int radar;          /* attributed radar code (see radar_code), -1 unknown */
+    float gain_db;      /* nominal receiver gain when received (amp + LNA + VGA) */
     /* Mode S */
     int nbits;
     uint8_t msg[14];
@@ -118,6 +119,9 @@ void analysis_print_summary(FILE *f);
 void analysis_gap(double t0, double t1);    /* no 1030 data between t0 and t1 (ADS-B window) */
 double analysis_rotation(void);             /* rotation of the selected / busiest radar, 0 unknown */
 double analysis_last_burst_end(void);       /* stream time of last committed burst end, -1 none */
+int analysis_main_code(void);               /* selected radar, else the one with most bursts; -2 none */
+void analysis_gain_shift(float delta_db);   /* receiver gain changed: shift background levels */
+void analysis_set_gain(float gain_db);      /* nominal gain, stamped on committed bursts */
 bool analysis_addr_known(uint32_t addr);    /* address was roll-called */
 int64_t analysis_target_addr(void);         /* resolved --aircraft address, -1 none/unknown */
 
@@ -125,6 +129,9 @@ int64_t analysis_target_addr(void);         /* resolved --aircraft address, -1 n
 struct adsb_stats {
     long windows, frames, df17, df11, idents, commb_idents;
     double seconds;
+    /* current / last window */
+    long win_frames, win_clip, win_samples;
+    float win_peak_db;     /* strongest decoded frame, dBFS */
 };
 void adsb_init(double fs);
 void adsb_window_start(void);
@@ -152,6 +159,11 @@ struct run_info {
     bool adsb_now;         /* currently listening on 1090 */
     double adsb_next;      /* seconds until the next window (approx.), <0 waiting for burst */
     char filters[160];
+    bool agc;              /* automatic gain */
+    int adsb_boost;        /* extra gain in ADS-B windows, dB */
+    double gain_age;       /* seconds since the last gain change, <0 never */
+    int gain_delta;        /* last change, dB */
+    char gain_why[64];
 };
 void display_init(void);
 void display_restore(void);

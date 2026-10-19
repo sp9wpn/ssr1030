@@ -147,6 +147,8 @@ void adsb_window_start(void)
     mlen = 0;
     resume = 0;
     st.windows++;
+    st.win_frames = st.win_clip = st.win_samples = 0;
+    st.win_peak_db = -99;
 }
 
 void adsb_get_stats(struct adsb_stats *s) { *s = st; }
@@ -228,6 +230,7 @@ void adsb_process(const int8_t *iq, size_t ns)
     float di = (float)(si / ns), dq = (float)(sq / ns);
     double acc = 0;
     for (size_t k = 0; k < ns; k++) {
+        if (iq[2 * k] >= 127 || iq[2 * k] <= -128 || iq[2 * k + 1] >= 127 || iq[2 * k + 1] <= -128) st.win_clip++;
         float i = iq[2 * k] - di, q = iq[2 * k + 1] - dq;
         float a = sqrtf(i * i + q * q);
         mag[mlen + k] = a;
@@ -235,6 +238,7 @@ void adsb_process(const int8_t *iq, size_t ns)
     }
     mlen += ns;
     st.seconds += ns / fs;
+    st.win_samples += ns;
     float thr = (float)(acc / ns) * 4.0f;           /* ~12 dB over mean */
 
     size_t msg_span = (size_t)((8 + 112 + 2) * spus);
@@ -259,6 +263,11 @@ void adsb_process(const int8_t *iq, size_t ns)
             if (hq - lq > bs) { bs = hq - lq; best = q; }
         }
         int len = try_decode(mag + best, h);
+        if (len) {
+            st.win_frames++;
+            float db = 20.0f * log10f(h / 127.0f);
+            if (db > st.win_peak_db) st.win_peak_db = db;
+        }
         p = len ? best + len : p + 1;
     }
     resume = p > end ? p - end : 0;

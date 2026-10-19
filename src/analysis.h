@@ -34,6 +34,7 @@ struct burst {
     int naddr;              /* distinct roll-call addresses */
     uint32_t addrs[64];
     double period;          /* time since previous burst of the same radar */
+    float gain;             /* nominal receiver gain at commit */
 };
 
 /* burst detector state (all interrogations, before filtering) */
@@ -103,6 +104,7 @@ struct analysis_state {
     int naddr_radar, naddr_tcas;
 
     int64_t target;             /* resolved --aircraft address */
+    float gain_db;              /* current nominal receiver gain */
     double gap_end;
 
     struct interrog recent[RECENT_N];
