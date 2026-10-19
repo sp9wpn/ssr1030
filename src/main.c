@@ -153,6 +153,8 @@ static void set_gain(hackrf_device *dev, struct gain g, const char *why)
 }
 
 /* called when a burst of the main radar was committed */
+static double last_clip_seen = -1e9;   /* no gain increase within 30 s of clipping */
+
 static void agc_burst(hackrf_device *dev, const struct burst *b, struct demod *d)
 {
     struct demod_stats st;
@@ -161,6 +163,7 @@ static void agc_burst(hackrf_device *dev, const struct burst *b, struct demod *d
     agc_samp0 = st.samples; agc_clip0 = st.clipped;
     if (!opt.agc || b->partial) return;
     bool clip = ds && (double)dc / ds > 2e-6;
+    if (clip) last_clip_seen = now_t;
     int t = gain_total(cur_gain);
     char why[64];
     if (b->peak > AGC_HIGH || clip) {
@@ -170,7 +173,7 @@ static void agc_burst(hackrf_device *dev, const struct burst *b, struct demod *d
         snprintf(why, sizeof(why), "beam peak %.1f dBFS%s", b->peak, clip ? ", clipping" : "");
         set_gain(dev, gain_from_total(t - step), why);
         agc_low_count = 0;
-    } else if (b->peak < AGC_LOW) {
+    } else if (b->peak < AGC_LOW && now_t - last_clip_seen > 30) {
         if (++agc_low_count >= 2) {
             int step = (int)lroundf((AGC_TARGET - b->peak) / 2) * 2;
             if (step > 12) step = 12;
@@ -182,13 +185,38 @@ static void agc_burst(hackrf_device *dev, const struct burst *b, struct demod *d
     win_peak = -99;
 }
 
+/* Clipping from any source: if 2 consecutive 1 s windows clip, lower the
+ * gain by 4 dB, but only while no beam pass is open and at most every 2 s. */
+
+static void agc_clip_guard(hackrf_device *dev, struct demod *d)
+{
+    static double win_t0 = -1, last_step = -1e9;
+    static uint64_t c0, s0;
+    static int hot;
+    struct demod_stats st;
+    demod_get_stats(d, &st, false);
+    if (win_t0 < 0) { win_t0 = now_t; c0 = st.clipped; s0 = st.samples; return; }
+    if (now_t - win_t0 < 1.0) return;
+    uint64_t ds = st.samples - s0, dc = st.clipped - c0;
+    win_t0 = now_t; c0 = st.clipped; s0 = st.samples;
+    bool clip = ds && (double)dc / ds > 1e-6;
+    if (clip) last_clip_seen = now_t;
+    hot = clip ? hot + 1 : 0;
+    if (!opt.agc || hot < 2 || AS.ob.open || now_t - last_step < 2.0 || gain_total(cur_gain) <= 0) return;
+    char why[64];
+    snprintf(why, sizeof(why), "clipping %.4f%% for %d s", 100.0 * dc / ds, hot);
+    set_gain(dev, gain_from_total(gain_total(cur_gain) - 4), why);
+    last_step = now_t;
+    hot = 0;
+}
+
 /* no burst of the main radar for a while: raise gain while nothing is strong */
 static void agc_idle(hackrf_device *dev, double since_burst, double rot)
 {
     static double last_idle;
     double lim = rot > 0 ? 2 * rot : 10;
     if (lim < 10) lim = 10;
-    if (!opt.agc || since_burst < lim || now_t - last_idle < lim) return;
+    if (!opt.agc || since_burst < lim || now_t - last_idle < lim || now_t - last_clip_seen < 30) return;
     last_idle = now_t;
     if (win_peak < -20 && gain_total(cur_gain) < GAIN_MAX) {
         int step = win_peak < -90 ? 12 : (int)lroundf((AGC_TARGET - win_peak) / 2) * 2;
@@ -741,12 +769,14 @@ int main(int argc, char **argv)
             if (live) {
                 static int seen_hist;
                 int code = analysis_main_code();
+                if (seen_hist > AS.nhist) seen_hist = AS.nhist;      /* statistics were reset */
                 while (seen_hist < AS.nhist) {
                     const struct burst *b = &AS.hist[seen_hist % BURST_HIST];
                     if (code != -2 && b->code == code) { agc_burst(dev, b, d); last_main_burst = now; }
                     seen_hist++;
                 }
                 agc_idle(dev, now - last_main_burst, analysis_rotation());
+                agc_clip_guard(dev, d);
                 if (now - last_main_burst > 3600) last_main_burst = now;   /* keep agc_idle periodic */
             }
         }

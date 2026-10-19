@@ -93,6 +93,8 @@ Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coi
 **Automatic gain is on by default** (`--no-auto-gain` turns it off, `g` toggles it).
 - **Target:** the beam peak of the main radar (`-r`, or the radar with the most bursts) is kept near −6 dBFS.
   - Peak ≥ −2 dBFS, or clipping: the gain goes down at once.
+  - Clipping from any source in 2 consecutive 1 s windows: the gain goes down 4 dB. This happens only between beam passes, at most every 2 s.
+  - The gain is never raised within 30 s of clipping, so it doesn't swing up and down.
   - Peak < −14 dBFS on two passes in a row: the gain goes up.
   - No beam pass for 10 s, or 2 rotations: the gain steps up by 4–12 dB while nothing strong is heard.
 - **Timing:** changes are made only right after a beam pass, never during one. The background level is shifted by the same amount, so burst detection is not disturbed.
