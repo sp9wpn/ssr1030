@@ -15,11 +15,12 @@
 #define EL  "\033[K\n"
 
 static uint64_t last_samples, last_clip, last_pulses, last_clip_prev, last_samples_prev;
-static long last_total[K_COUNT];
+/* snapshots of the counters for per-minute rates over the last 60 s */
+#define SNAP_N 160
+static struct { double t; long total[K_COUNT]; long bds[256]; } snap[SNAP_N];
+static int nsnap;
 static double last_now = -1;
-static float rate[K_COUNT];
-static long last_bds[256];
-static float bds_rate[256];
+static float rate[K_COUNT], bds_rate[256];   /* per minute */
 
 /* spaces needed to pad s to w visible columns (escape sequences excluded) */
 static int pad_to(const char *s, int w)
@@ -243,13 +244,31 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         uint64_t ds = st.samples - last_samples;
         clip_pct = ds ? 100.0 * (st.clipped - last_clip) / ds : 0;
         pps = (st.pulses - last_pulses) / dt;
-        for (int k = 0; k < K_COUNT; k++) {
-            float r = (AS.total[k] - last_total[k]) / dt;
-            rate[k] = rate[k] * 0.7f + r * 0.3f;
-        }
     }
     last_now = now; last_samples = st.samples; last_clip = st.clipped; last_pulses = st.pulses;
-    memcpy(last_total, AS.total, sizeof(last_total));
+
+    /* per-minute rates: counts over the last 60 s (or since start / reset) */
+    {
+        int cur = nsnap % SNAP_N;
+        snap[cur].t = now;
+        memcpy(snap[cur].total, AS.total, sizeof(AS.total));
+        memcpy(snap[cur].bds, AS.bds, sizeof(AS.bds));
+        nsnap++;
+        int old = cur;
+        for (int i = 1; i < nsnap && i < SNAP_N; i++) {
+            int j = (cur - i + SNAP_N) % SNAP_N;
+            if (now - snap[j].t > 60) break;
+            bool reset = false;              /* counters went down: statistics were reset */
+            for (int k = 0; k < K_COUNT && !reset; k++) if (snap[j].total[k] > AS.total[k]) reset = true;
+            if (reset) break;
+            old = j;
+        }
+        double span = now - snap[old].t;
+        for (int k = 0; k < K_COUNT; k++)
+            rate[k] = span > 0 ? (float)((AS.total[k] - snap[old].total[k]) * 60.0 / span) : 0;
+        for (int b = 0; b < 256; b++)
+            bds_rate[b] = span > 0 ? (float)((AS.bds[b] - snap[old].bds[b]) * 60.0 / span) : 0;
+    }
 
     fputs("\033[H", stdout);
     int h = (int)now / 3600, m = ((int)now / 60) % 60, s = (int)now % 60;
@@ -348,25 +367,22 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     /* left: per kind table; middle: per BDS register table; right: radars and misc */
     char left[24][80], mid[24][96], right[24][160];
     int nl = 0, nm = 0, nr = 0;
-    snprintf(left[nl++], 80, B "%-24s %8s %7s %7s %6s" R, "Interrogation", "total", "in-beam", "sidelb", "/s");
+    snprintf(left[nl++], 80, B "%-24s %8s %7s %7s %6s" R, "Interrogation", "total", "in-beam", "sidelb", "/min");
     for (int k = 0; k < K_COUNT && nl < 24; k++) {
         if (!AS.total[k] || k == K_UF0 || k == K_UF16) continue;
-        snprintf(left[nl++], 80, "%-24s %8ld %7ld %7ld %6.1f", kind_label(k), AS.total[k], AS.inbeam[k],
+        snprintf(left[nl++], 80, "%-24s %8ld %7ld %7ld %6.0f", kind_label(k), AS.total[k], AS.inbeam[k],
                  AS.side[k], rate[k]);
     }
     if (nl == 1) snprintf(left[nl++], 80, DIM "(no radar interrogations yet)" R);
 
-    snprintf(mid[nm++], 96, B "%-14s %7s %7s %6s %5s" R, "Comm-B BDS", "total", "in-beam", "sidelb", "/s");
+    snprintf(mid[nm++], 96, B "%-14s %7s %7s %6s %5s" R, "Comm-B BDS", "total", "in-beam", "sidelb", "/min");
     for (int b = 0; b < 256 && nm < 24; b++) {
         if (!AS.bds[b]) continue;
         const char *ab = bds_abbrev(b);
         char lab[16];
         snprintf(lab, sizeof(lab), "%X,%X %s", b >> 4, b & 15, ab ? ab : "");
-        float r = (AS.bds[b] - last_bds[b]) / (dt > 0 ? dt : 1);
-        bds_rate[b] = dt > 0 ? bds_rate[b] * 0.7f + r * 0.3f : bds_rate[b];
-        snprintf(mid[nm++], 96, "%-14s %7ld %7ld %6ld %5.1f", lab, AS.bds[b], AS.bds_inbeam[b], AS.bds_side[b], bds_rate[b]);
+        snprintf(mid[nm++], 96, "%-14s %7ld %7ld %6ld %5.0f", lab, AS.bds[b], AS.bds_inbeam[b], AS.bds_side[b], bds_rate[b]);
     }
-    memcpy(last_bds, AS.bds, sizeof(last_bds));
     if (nm == 1) snprintf(mid[nm++], 96, DIM "(no Comm-B requests yet)" R);
 
     snprintf(right[nr++], 160, B "Radar  bursts rotation  dwell  per burst" R);

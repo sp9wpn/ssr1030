@@ -91,8 +91,8 @@ Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coi
 ## Dashboard layout
 
 Below the status lines there are three columns:
-- **Interrogations:** per type, with total, in-beam, sidelobe and rate.
-- **Comm-B BDS:** per requested register, with register and shortcode (`4,0 selAlt`), total, in-beam, sidelobe and rate.
+- **Interrogations:** per type, with total, in-beam, sidelobe and rate per minute (counted over the last 60 s).
+- **Comm-B BDS:** per requested register, with register and shortcode (`4,0 selAlt`), total, in-beam, sidelobe and rate per minute.
 - **Radars:** one line each with bursts, rotation, dwell and interrogations per burst. UF11 codes, DI/PC and roll-called aircraft are in the exit summary.
 
 The three columns need about 150 terminal columns. Below them come the burst table, the last burst sequence, the interleaving table and the recent interrogations.
