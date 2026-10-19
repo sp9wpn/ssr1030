@@ -253,7 +253,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     if (AS.nhist > 0) {
         struct burst *b = &AS.hist[(AS.nhist - 1) % BURST_HIST];
         printf(B "Last burst #%d sequence" R DIM
-               "  (A C A/C-only all-call, AA CC plain A/C, S-all UF11, S-alt/S-sqk UF4/5, acid/setAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0, S-msg Comm-A, #N repeat)" R EL,
+               "  (A C A/C-only all-call, AA CC plain A/C, S UF11 all-call, S-alt/S-sqk UF4/5, acid/setAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0, S-msg Comm-A, #N repeat)" R EL,
                b->id);
         print_seq(b, cols, 4);
         char tl[400]; int o = snprintf(tl, sizeof(tl), "  targets:");

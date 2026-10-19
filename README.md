@@ -114,7 +114,7 @@ They are left out of all radar analysis.
 - **Per radar:** rotation period (median time between burst peaks), dwell time, and interrogations per burst by query type (avg/min/max).
 - **Burst table columns** (each interrogation counted once, so they add up to `n`):
   - `AA/CC`, `A/C`, `ACSall`: plain Mode A/C, A/C-only all-calls, A/C/S all-calls.
-  - `S-all`: UF11 all-calls.
+  - `S`: UF11 all-calls.
   - `S-alt`, `S-sqk`: UF4 and UF5 roll-calls without a Comm-B request.
   - `acid`, `setAlt`, `trk`, `hdgSpd`: Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
   - `oBDS`: any other BDS.
@@ -128,7 +128,7 @@ They are left out of all radar analysis.
 | `AA` `CC` | Plain Mode A / Mode C (no P4) |
 | `A` `C` | A/C-only all-call (short P4) |
 | `As` `Cs` | A/C/S all-call (long P4) |
-| `S-all` | UF11 Mode S all-call (acquisition) |
+| `S` | UF11 Mode S all-call (acquisition) |
 | `S-alt` / `S-sqk` | UF4 altitude / UF5 Mode A code roll-call, no Comm-B |
 | `acid` `setAlt` `trk` `hdgSpd` | Roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
 | `cap` `gicb` `pos` `met` `ra` `aicb` … | BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
