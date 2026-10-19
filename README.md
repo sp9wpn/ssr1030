@@ -164,3 +164,8 @@ The interleaving statistics use the same tokens, without the target numbers.
 - `radar` is the attributed radar code, or `-` when unknown.
 - `quality` is the weakest DPSK bit confidence (0–1).
 - `hex` is the raw Mode S message.
+
+## License
+
+BSD 3-Clause, see [LICENSE](LICENSE).
+The detection approach follows [dump1030](https://github.com/Fuziih/dump1030) (BSD 3-Clause, Copyright (c) 2022, Fuziih).
