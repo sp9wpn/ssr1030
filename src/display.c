@@ -109,18 +109,18 @@ static void draw_graph(int cols, int rows)
            b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n, b->nside,
            b->nweak, g_scroll + 1, last, n);
 
-    int W = cols - 40;
+    int W = cols - 36;
     if (W < 10) W = 10;
     for (int i = g_scroll; i < last; i++) {
         const struct gpoint *g = &b->gp[i];
-        char ts[24], tok[32];
+        char ts[24];
         seq_token_str(g->tok, ts, sizeof(ts));
-        if (g->ka != NO_TARGET) snprintf(tok, sizeof(tok), "%s/%s", ts, ac_name(b->addrs[g->ka]));
-        else snprintf(tok, sizeof(tok), "%s", ts);
+        const char *tg = g->ka != NO_TARGET ? ac_name(b->addrs[g->ka]) : "";
         int len = (int)lroundf((g->amp - ybot) / (ytop - ybot) * W);
         if (len < 1) len = 1;
         if (len > W) len = W;
-        printf("%s%+10.2f ms  %-17s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), tok, g->amp);
+        /* fixed-width fields: query type 6, target (callsign or hex) 7 */
+        printf("%s%+10.2f ms  %-6.6s %-7.7s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), ts, tg, g->amp);
         fputs(R, stdout);
         fputs(gp_color(g->cls), stdout);
         for (int k = 0; k < len; k++) fputs(gp_char(g->cls), stdout);
