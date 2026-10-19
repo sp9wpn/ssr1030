@@ -62,6 +62,20 @@ Per-burst counts, sequences, dwell and rotation are computed only from interroga
 
 Dashboard keys: `q` quit, `+`/`-` VGA ±2 dB, `L`/`l` LNA ±8 dB, `a` amp on/off (any of these switches to manual gain), `g` automatic gain on/off, `r` reset statistics.
 
+**Dashboard command line** (vi style): press `:`, type a command, then `Enter` runs it, `Esc` cancels, and `Backspace` edits.
+
+| Command | Effect |
+|---|---|
+| `:r SI17`, `:r II3` (`:radar`) | Keep only that radar |
+| `:r` | Clear the radar filter |
+| `:a 48AF01`, `:a LOT3KM`, `:a cs:ABC123` (`:aircraft`) | Keep only interrogations addressed to that aircraft |
+| `:a` | Clear the aircraft filter |
+| `:h` | Show the command list |
+| `:q` | Quit |
+
+A filter change resets the statistics, so counts from different filters are never mixed.
+This also works when replaying with `-f … -d`.
+
 Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coincidences of unrelated pulses.
 
 ## Gain

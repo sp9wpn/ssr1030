@@ -295,10 +295,141 @@ static void kb_restore(void)
     if (tio_raw) tcsetattr(0, TCSANOW, &tio_saved);
 }
 
-static void handle_keys(hackrf_device *dev)
+static bool parse_aircraft(const char *s)
+{
+    opt.acfg.ac_addr = -1;
+    opt.acfg.ac_callsign[0] = 0;
+    if (!strncasecmp(s, "cs:", 3)) {
+        snprintf(opt.acfg.ac_callsign, sizeof(opt.acfg.ac_callsign), "%s", s + 3);
+    } else {
+        const char *h = !strncasecmp(s, "0x", 2) ? s + 2 : s;
+        bool hex = strlen(h) == 6;
+        for (int k = 0; hex && k < 6; k++) hex = isxdigit((unsigned char)h[k]);
+        if (hex) opt.acfg.ac_addr = strtol(h, NULL, 16);
+        else if (strlen(s) <= 8) snprintf(opt.acfg.ac_callsign, sizeof(opt.acfg.ac_callsign), "%s", s);
+        else return false;
+    }
+    for (char *p = opt.acfg.ac_callsign; *p; p++) *p = toupper((unsigned char)*p);
+    return true;
+}
+
+static void build_filters(char *buf, size_t n)
+{
+    int o = 0;
+    char rc[8];
+    buf[0] = 0;
+    if (opt.acfg.radar_sel >= 0) {
+        radar_code_str(opt.acfg.radar_sel, rc, sizeof(rc));
+        o += snprintf(buf + o, n - o, "radar %s  ", rc);
+    }
+    if (opt.acfg.modes_only) o += snprintf(buf + o, n - o, "Mode S only  ");
+    if (opt.acfg.rollcall_only) o += snprintf(buf + o, n - o, "roll-calls only  ");
+    if (opt.acfg.ac_addr >= 0)
+        o += snprintf(buf + o, n - o, "aircraft %06llX  ", (unsigned long long)opt.acfg.ac_addr);
+    if (opt.acfg.ac_callsign[0]) o += snprintf(buf + o, n - o, "aircraft %s  ", opt.acfg.ac_callsign);
+}
+
+/* ---------- vi-style command line (':' on the dashboard) ---------- */
+static bool cmd_mode;
+static char cmd_buf[64];
+static int cmd_len;
+static char cmd_msg[160];
+
+static void apply_filters(struct run_info *ri, const char *what)
+{
+    analysis_init(&opt.acfg);                 /* statistics restart with the new filter */
+    analysis_set_gain(gain_total(cur_gain));
+    build_filters(ri->filters, sizeof(ri->filters));
+    snprintf(cmd_msg, sizeof(cmd_msg), "%s - statistics reset", what);
+}
+
+static void run_command(struct run_info *ri, char *c)
+{
+    while (*c == ' ') c++;
+    char *arg = c;
+    while (*arg && *arg != ' ') arg++;
+    if (*arg) *arg++ = 0;
+    while (*arg == ' ') arg++;
+    char *e = arg + strlen(arg);
+    while (e > arg && e[-1] == ' ') *--e = 0;
+    bool clear = !*arg || !strcmp(arg, "-") || !strcasecmp(arg, "all") || !strcasecmp(arg, "off");
+
+    if (!strcmp(c, "r") || !strcmp(c, "radar")) {
+        if (clear) {
+            opt.acfg.radar_sel = -1;
+            apply_filters(ri, "radar filter cleared");
+        } else {
+            int code = radar_code_parse(arg);
+            if (code < 0) { snprintf(cmd_msg, sizeof(cmd_msg), "bad radar code '%s' (SI1-63 or II0-15)", arg); return; }
+            opt.acfg.radar_sel = code;
+            char rc[8], m[64];
+            radar_code_str(code, rc, sizeof(rc));
+            snprintf(m, sizeof(m), "radar filter %s", rc);
+            apply_filters(ri, m);
+        }
+    } else if (!strcmp(c, "a") || !strcmp(c, "aircraft")) {
+        if (clear) {
+            opt.acfg.ac_addr = -1;
+            opt.acfg.ac_callsign[0] = 0;
+            apply_filters(ri, "aircraft filter cleared");
+        } else if (!parse_aircraft(arg)) {
+            snprintf(cmd_msg, sizeof(cmd_msg), "bad aircraft '%s' (6 hex digits or callsign)", arg);
+        } else {
+            char m[64];
+            if (opt.acfg.ac_addr >= 0) snprintf(m, sizeof(m), "aircraft filter %06llX", (unsigned long long)opt.acfg.ac_addr);
+            else {
+                int64_t a = cs_find(opt.acfg.ac_callsign);
+                if (a >= 0) snprintf(m, sizeof(m), "aircraft filter %s = %06llX", opt.acfg.ac_callsign, (unsigned long long)a);
+                else snprintf(m, sizeof(m), "aircraft filter %s (address not known yet)", opt.acfg.ac_callsign);
+            }
+            apply_filters(ri, m);
+        }
+    } else if (!strcmp(c, "q") || !strcmp(c, "quit")) {
+        stop = 1;
+    } else if (!strcmp(c, "h") || !strcmp(c, "help") || !*c) {
+        snprintf(cmd_msg, sizeof(cmd_msg), ":r SI17 / :r  radar filter set/clear   :a 48AF01|LOT3KM / :a  aircraft filter   :q quit");
+    } else {
+        snprintf(cmd_msg, sizeof(cmd_msg), "unknown command ':%s' (:h for help)", c);
+    }
+}
+
+/* drop the rest of an escape sequence (arrow keys etc.) */
+static void eat_escape(void)
 {
     char c;
+    if (read(0, &c, 1) != 1) return;
+    if (c != '[' && c != 'O') return;
+    while (read(0, &c, 1) == 1)
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') break;
+}
+
+/* returns true when the screen should be redrawn now */
+static bool handle_keys(hackrf_device *dev, struct run_info *ri)
+{
+    char c;
+    bool redraw = false;
     while (read(0, &c, 1) == 1) {
+        redraw = true;
+        if (cmd_mode) {
+            if (c == '\r' || c == '\n') {
+                cmd_buf[cmd_len] = 0;
+                cmd_mode = false;
+                cmd_msg[0] = 0;
+                run_command(ri, cmd_buf);
+            } else if (c == 27) {
+                eat_escape();
+                cmd_mode = false;
+                cmd_msg[0] = 0;
+            } else if (c == 127 || c == 8) {
+                if (cmd_len > 0) cmd_len--;
+                else cmd_mode = false;
+            } else if (c >= 32 && c < 127 && cmd_len < (int)sizeof(cmd_buf) - 1) {
+                cmd_buf[cmd_len++] = c;
+            }
+            continue;
+        }
+        if (c == ':') { cmd_mode = true; cmd_len = 0; cmd_msg[0] = 0; continue; }
+        if (c == 27) { eat_escape(); continue; }
         struct gain g = cur_gain;
         bool manual = true;
         switch (c) {
@@ -317,6 +448,10 @@ static void handle_keys(hackrf_device *dev)
             set_gain(dev, g, "manual");
         }
     }
+    ri->cmd_mode = cmd_mode;
+    snprintf(ri->cmd, sizeof(ri->cmd), "%.*s", cmd_len, cmd_buf);
+    snprintf(ri->cmd_msg, sizeof(ri->cmd_msg), "%s", cmd_msg);
+    return redraw;
 }
 
 static void usage(void)
@@ -371,22 +506,6 @@ static void usage(void)
 "  -q, --quiet            no live output; summary at exit\n\n"
 "Keys (dashboard): q quit, +/- VGA, L/l LNA, a amp (any of these: manual gain), g auto gain,\n"
 "                  r reset statistics\n");
-}
-
-static bool parse_aircraft(const char *s)
-{
-    if (!strncasecmp(s, "cs:", 3)) {
-        snprintf(opt.acfg.ac_callsign, sizeof(opt.acfg.ac_callsign), "%s", s + 3);
-    } else {
-        const char *h = !strncasecmp(s, "0x", 2) ? s + 2 : s;
-        bool hex = strlen(h) == 6;
-        for (int k = 0; hex && k < 6; k++) hex = isxdigit((unsigned char)h[k]);
-        if (hex) opt.acfg.ac_addr = strtol(h, NULL, 16);
-        else if (strlen(s) <= 8) snprintf(opt.acfg.ac_callsign, sizeof(opt.acfg.ac_callsign), "%s", s);
-        else return false;
-    }
-    for (char *p = opt.acfg.ac_callsign; *p; p++) *p = toupper((unsigned char)*p);
-    return true;
 }
 
 int main(int argc, char **argv)
@@ -489,20 +608,7 @@ int main(int argc, char **argv)
     int fd = -1;
     hackrf_device *dev = NULL;
     struct run_info ri = { .fs = opt.fs, .freq = opt.freq, .live = live, .adsb = opt.adsb };
-    {
-        int o = 0;
-        char rc[8];
-        if (opt.acfg.radar_sel >= 0) {
-            radar_code_str(opt.acfg.radar_sel, rc, sizeof(rc));
-            o += snprintf(ri.filters + o, sizeof(ri.filters) - o, "radar %s  ", rc);
-        }
-        if (opt.acfg.modes_only) o += snprintf(ri.filters + o, sizeof(ri.filters) - o, "Mode S only  ");
-        if (opt.acfg.rollcall_only) o += snprintf(ri.filters + o, sizeof(ri.filters) - o, "roll-calls only  ");
-        if (opt.acfg.ac_addr >= 0)
-            o += snprintf(ri.filters + o, sizeof(ri.filters) - o, "aircraft %06llX  ", (unsigned long long)opt.acfg.ac_addr);
-        if (opt.acfg.ac_callsign[0])
-            o += snprintf(ri.filters + o, sizeof(ri.filters) - o, "aircraft %s  ", opt.acfg.ac_callsign);
-    }
+    build_filters(ri.filters, sizeof(ri.filters));
     char srcname[300];
 
     if (live) {
@@ -640,9 +746,9 @@ int main(int argc, char **argv)
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
         double el = (ts.tv_sec - last_draw.tv_sec) + (ts.tv_nsec - last_draw.tv_nsec) / 1e9;
-        if (el > 0.5) {
+        bool kred = tio_raw && handle_keys(dev, &ri);
+        if (el > 0.5 || kred) {
             last_draw = ts;
-            if (tio_raw) handle_keys(dev);
             ri.lna = opt.lna; ri.vga = opt.vga; ri.amp = opt.amp;
             ri.agc = opt.agc;
             ri.gain_age = gain_change_t >= 0 ? now - gain_change_t : -1;

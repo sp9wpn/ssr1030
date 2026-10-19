@@ -305,7 +305,10 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         if ((int)strlen(buf) > cols - 1) buf[cols - 1] = 0;
         printf("%s" EL, buf);
     }
-    printf(DIM "keys: q quit  +/- VGA  L/l LNA  a amp (manual)  g auto gain  r reset stats" R EL);
+    if (ri->cmd_mode) printf(B ":%s" R "\033[7m \033[0m" DIM "   (Enter run, Esc cancel; :h help)" R EL, ri->cmd);
+    else if (ri->cmd_msg[0]) printf(YEL "%s" R DIM "   keys: q  +/-  L/l  a  g  r  : command" R EL, ri->cmd_msg);
+    else printf(DIM "keys: q quit  +/- VGA  L/l LNA  a amp (manual)  g auto gain  r reset stats  "
+                ": command (:r SI17, :a 48AF01|LOT3KM, :r / :a clear)" R EL);
     fputs("\033[J", stdout);
     fflush(stdout);
 }
