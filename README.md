@@ -60,21 +60,24 @@ Per-burst counts, sequences, dwell and rotation are computed only from interroga
 - **Preload:** `--adsblol LAT,LON` fills the table at startup with every aircraft within `--adsblol-radius` NM (default 150, API max 250) of that position, from the public [adsb.lol](https://api.adsb.lol) API (`/v2/lat/…/lon/…/dist/…`, via `curl`, no key needed). It sends the coordinates to adsb.lol and works with or without `-B` and in `--file` mode. If the request fails, the run continues without it.
 - **Table:** kept in memory only. Optionally, `--adsb-db PATH` loads it at start and saves it after each window (for example to a file in `/tmp`). That also lets `--file` replays show callsigns.
 
-Dashboard keys: `q` quit, `+`/`-` VGA ±2 dB, `L`/`l` LNA ±8 dB, `a` amp on/off (any of these switches to manual gain), `g` automatic gain on/off, `r` reset statistics.
+Dashboard keys:
 
-**Dashboard command line** (vi style): press `:`, type a command, then `Enter` runs it, `Esc` cancels, and `Backspace` edits.
-
-| Command | Effect |
+| Key | Action |
 |---|---|
-| `:r SI17`, `:r II3` (`:radar`) | Keep only that radar |
-| `:r` | Clear the radar filter |
-| `:a 48AF01`, `:a LOT3KM`, `:a cs:ABC123` (`:aircraft`) | Keep only interrogations addressed to that aircraft |
-| `:a` | Clear the aircraft filter |
-| `:h` | Show the command list |
-| `:q` | Quit |
+| `q` | Quit |
+| `+` / `-` | VGA ±2 dB |
+| `L` / `l` | LNA ±8 dB |
+| `p` | RF amp on/off |
+| `g` | Automatic gain on/off |
+| `r` | Radar filter: type `SI17` or `II3`, then `Enter` |
+| `a` | Aircraft filter: type a hex address or a callsign, then `Enter` |
+| `x` | Reset statistics |
 
-A filter change resets the statistics, so counts from different filters are never mixed.
-This also works when replaying with `-f … -d`.
+- **Manual gain:** `+ - L l p` switch the gain to manual.
+- **Filter input:** `r` and `a` open an input line pre-filled with the current filter.
+  - An empty line removes the filter.
+  - `Esc` cancels, `Backspace` edits, `Ctrl-U` clears the line.
+- **Statistics:** a filter change resets them, so counts from different filters never mix. This also works when replaying with `-f … -d`.
 
 Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coincidences of unrelated pulses.
 
@@ -87,7 +90,7 @@ Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coi
   - No beam pass for 10 s, or 2 rotations: the gain steps up by 4–12 dB while nothing strong is heard.
 - **Timing:** changes are made only right after a beam pass, never during one. The background level is shifted by the same amount, so burst detection is not disturbed.
 - **Stages:** the nominal gain (amp 11 dB + LNA + VGA) is split so that VGA stays ≥ 16 dB while LNA can move. The RF amp is used only above 80 dB, because near a radar it overloads first.
-- **Manual override:** pressing `+ - L l a` switches to manual gain.
+- **Manual override:** pressing `+ - L l p` switches to manual gain.
 - **Starting point:** `-a/-l/-g` set the starting gain. The default is amp off, LNA 32, VGA 24.
 
 ADS-B windows use the same gain as 1030.

@@ -153,11 +153,11 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         printf("  %s" R DIM "  auto gain keeps the main radar's beam peak near -6 dBFS (peak %.1f, clip %.4f%% over %.0f s)" R EL,
                clipping ? RED "clipping seen" : (weak ? YEL "weak" : GRN "level OK"), peak_w, clip_w_pct, win);
     else if (clipping)
-        printf(RED B "  CLIPPING %.0f s ago" R RED " - lower gain: '-' VGA -2 dB, 'l' LNA -8 dB, 'a' amp off"
+        printf(RED B "  CLIPPING %.0f s ago" R RED " - lower gain: '-' VGA -2 dB, 'l' LNA -8 dB, 'p' amp off"
                "  (warning holds %.0f s)" R EL, now - last_clip_t, win);
     else if (weak)
         printf(YEL B "  WEAK SIGNAL" R YEL " - strongest pulse in %.0f s only %.1f dB above noise; raise gain: "
-               "'+' VGA +2 dB, 'L' LNA +8 dB, 'a' amp on" R EL, win, peak_w - st.noise_dbfs);
+               "'+' VGA +2 dB, 'L' LNA +8 dB, 'p' amp on" R EL, win, peak_w - st.noise_dbfs);
     else if (span < 0.8 * win)
         printf(DIM "  level check: collecting %.0f/%.0f s since start or last gain change" R EL, span, win);
     else printf(GRN "  level OK" R DIM " - peak %.1f dB above noise over %.0f s, no clipping" R EL,
@@ -305,10 +305,13 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         if ((int)strlen(buf) > cols - 1) buf[cols - 1] = 0;
         printf("%s" EL, buf);
     }
-    if (ri->cmd_mode) printf(B ":%s" R "\033[7m \033[0m" DIM "   (Enter run, Esc cancel; :h help)" R EL, ri->cmd);
-    else if (ri->cmd_msg[0]) printf(YEL "%s" R DIM "   keys: q  +/-  L/l  a  g  r  : command" R EL, ri->cmd_msg);
-    else printf(DIM "keys: q quit  +/- VGA  L/l LNA  a amp (manual)  g auto gain  r reset stats  "
-                ": command (:r SI17, :a 48AF01|LOT3KM, :r / :a clear)" R EL);
+    if (ri->cmd_mode)
+        printf(B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R EL,
+               ri->cmd_kind == 'r' ? "Radar filter (SI17 / II3)" : "Aircraft filter (hex or callsign)", ri->cmd);
+    else if (ri->cmd_msg[0])
+        printf(YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  x reset" R EL, ri->cmd_msg);
+    else printf(DIM "keys: q quit  +/- VGA  L/l LNA  p RF amp (manual)  g auto gain  r radar filter  a aircraft filter  "
+                "x reset stats" R EL);
     fputs("\033[J", stdout);
     fflush(stdout);
 }

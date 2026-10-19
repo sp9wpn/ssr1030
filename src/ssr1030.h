@@ -157,7 +157,8 @@ struct run_info {
     double adsb_next;      /* seconds until the next window (approx.), <0 waiting for burst */
     char filters[160];
     bool agc;              /* automatic gain */
-    bool cmd_mode;         /* ':' command line open */
+    bool cmd_mode;         /* filter input line open */
+    char cmd_kind;         /* 'r' radar or 'a' aircraft */
     char cmd[64];
     char cmd_msg[160];     /* result of the last command */
     double gain_age;       /* seconds since the last gain change, <0 never */

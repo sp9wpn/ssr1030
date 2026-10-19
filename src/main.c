@@ -329,8 +329,8 @@ static void build_filters(char *buf, size_t n)
     if (opt.acfg.ac_callsign[0]) o += snprintf(buf + o, n - o, "aircraft %s  ", opt.acfg.ac_callsign);
 }
 
-/* ---------- vi-style command line (':' on the dashboard) ---------- */
-static bool cmd_mode;
+/* ---------- filter input line ('r' radar, 'a' aircraft; empty clears) ---------- */
+static char edit_kind;                /* 'r', 'a' or 0 when not editing */
 static char cmd_buf[64];
 static int cmd_len;
 static char cmd_msg[160];
@@ -343,64 +343,57 @@ static void apply_filters(struct run_info *ri, const char *what)
     snprintf(cmd_msg, sizeof(cmd_msg), "%s - statistics reset", what);
 }
 
-static void run_command(struct run_info *ri, char *c)
+static void apply_input(struct run_info *ri, char kind, char *arg)
 {
-    while (*c == ' ') c++;
-    char *arg = c;
-    while (*arg && *arg != ' ') arg++;
-    if (*arg) *arg++ = 0;
     while (*arg == ' ') arg++;
     char *e = arg + strlen(arg);
     while (e > arg && e[-1] == ' ') *--e = 0;
-    bool clear = !*arg || !strcmp(arg, "-") || !strcasecmp(arg, "all") || !strcasecmp(arg, "off");
-
-    if (!strcmp(c, "r") || !strcmp(c, "radar")) {
-        if (clear) {
-            opt.acfg.radar_sel = -1;
-            apply_filters(ri, "radar filter cleared");
-        } else {
-            int code = radar_code_parse(arg);
-            if (code < 0) { snprintf(cmd_msg, sizeof(cmd_msg), "bad radar code '%s' (SI1-63 or II0-15)", arg); return; }
-            opt.acfg.radar_sel = code;
-            char rc[8], m[64];
-            radar_code_str(code, rc, sizeof(rc));
-            snprintf(m, sizeof(m), "radar filter %s", rc);
-            apply_filters(ri, m);
-        }
-    } else if (!strcmp(c, "a") || !strcmp(c, "aircraft")) {
-        if (clear) {
+    char m[64];
+    if (kind == 'r') {
+        if (!*arg) { opt.acfg.radar_sel = -1; apply_filters(ri, "radar filter cleared"); return; }
+        int code = radar_code_parse(arg);
+        if (code < 0) { snprintf(cmd_msg, sizeof(cmd_msg), "bad radar code '%s' (SI1-63 or II0-15), filter unchanged", arg); return; }
+        opt.acfg.radar_sel = code;
+        char rc[8];
+        radar_code_str(code, rc, sizeof(rc));
+        snprintf(m, sizeof(m), "radar filter %s", rc);
+        apply_filters(ri, m);
+    } else {
+        if (!*arg) {
             opt.acfg.ac_addr = -1;
             opt.acfg.ac_callsign[0] = 0;
             apply_filters(ri, "aircraft filter cleared");
-        } else if (!parse_aircraft(arg)) {
-            snprintf(cmd_msg, sizeof(cmd_msg), "bad aircraft '%s' (6 hex digits or callsign)", arg);
-        } else {
-            char m[64];
-            if (opt.acfg.ac_addr >= 0) snprintf(m, sizeof(m), "aircraft filter %06llX", (unsigned long long)opt.acfg.ac_addr);
-            else {
-                int64_t a = cs_find(opt.acfg.ac_callsign);
-                if (a >= 0) snprintf(m, sizeof(m), "aircraft filter %s = %06llX", opt.acfg.ac_callsign, (unsigned long long)a);
-                else snprintf(m, sizeof(m), "aircraft filter %s (address not known yet)", opt.acfg.ac_callsign);
-            }
-            apply_filters(ri, m);
+            return;
         }
-    } else if (!strcmp(c, "q") || !strcmp(c, "quit")) {
-        stop = 1;
-    } else if (!strcmp(c, "h") || !strcmp(c, "help") || !*c) {
-        snprintf(cmd_msg, sizeof(cmd_msg), ":r SI17 / :r  radar filter set/clear   :a 48AF01|LOT3KM / :a  aircraft filter   :q quit");
-    } else {
-        snprintf(cmd_msg, sizeof(cmd_msg), "unknown command ':%s' (:h for help)", c);
+        int64_t old_addr = opt.acfg.ac_addr;
+        char old_cs[9];
+        snprintf(old_cs, sizeof(old_cs), "%s", opt.acfg.ac_callsign);
+        if (!parse_aircraft(arg)) {
+            opt.acfg.ac_addr = old_addr;
+            snprintf(opt.acfg.ac_callsign, sizeof(opt.acfg.ac_callsign), "%s", old_cs);
+            snprintf(cmd_msg, sizeof(cmd_msg), "bad aircraft '%s' (6 hex digits or callsign), filter unchanged", arg);
+            return;
+        }
+        if (opt.acfg.ac_addr >= 0) snprintf(m, sizeof(m), "aircraft filter %06llX", (unsigned long long)opt.acfg.ac_addr);
+        else {
+            int64_t a = cs_find(opt.acfg.ac_callsign);
+            if (a >= 0) snprintf(m, sizeof(m), "aircraft filter %s = %06llX", opt.acfg.ac_callsign, (unsigned long long)a);
+            else snprintf(m, sizeof(m), "aircraft filter %s (address not known yet)", opt.acfg.ac_callsign);
+        }
+        apply_filters(ri, m);
     }
 }
 
-/* drop the rest of an escape sequence (arrow keys etc.) */
-static void eat_escape(void)
+/* drop the rest of an escape sequence (arrow keys etc.);
+ * returns false for a bare Esc key */
+static bool eat_escape(void)
 {
     char c;
-    if (read(0, &c, 1) != 1) return;
-    if (c != '[' && c != 'O') return;
+    if (read(0, &c, 1) != 1) return false;
+    if (c != '[' && c != 'O') return true;
     while (read(0, &c, 1) == 1)
         if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') break;
+    return true;
 }
 
 /* returns true when the screen should be redrawn now */
@@ -410,26 +403,42 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
     bool redraw = false;
     while (read(0, &c, 1) == 1) {
         redraw = true;
-        if (cmd_mode) {
+        if (edit_kind) {
             if (c == '\r' || c == '\n') {
                 cmd_buf[cmd_len] = 0;
-                cmd_mode = false;
-                cmd_msg[0] = 0;
-                run_command(ri, cmd_buf);
+                char k = edit_kind;
+                edit_kind = 0;
+                apply_input(ri, k, cmd_buf);
             } else if (c == 27) {
-                eat_escape();
-                cmd_mode = false;
-                cmd_msg[0] = 0;
+                if (!eat_escape()) {               /* bare Esc cancels; arrow keys are ignored */
+                    edit_kind = 0;
+                    snprintf(cmd_msg, sizeof(cmd_msg), "cancelled, filter unchanged");
+                }
             } else if (c == 127 || c == 8) {
                 if (cmd_len > 0) cmd_len--;
-                else cmd_mode = false;
+            } else if (c == 21) {
+                cmd_len = 0;                       /* Ctrl-U clears the line */
             } else if (c >= 32 && c < 127 && cmd_len < (int)sizeof(cmd_buf) - 1) {
                 cmd_buf[cmd_len++] = c;
             }
             continue;
         }
-        if (c == ':') { cmd_mode = true; cmd_len = 0; cmd_msg[0] = 0; continue; }
         if (c == 27) { eat_escape(); continue; }
+        if (c == 'r' || c == 'a') {
+            edit_kind = c;
+            /* start from the current filter so it can be edited */
+            cmd_len = 0;
+            if (c == 'r' && opt.acfg.radar_sel >= 0) {
+                radar_code_str(opt.acfg.radar_sel, cmd_buf, sizeof(cmd_buf));
+                cmd_len = strlen(cmd_buf);
+            } else if (c == 'a' && opt.acfg.ac_addr >= 0) {
+                cmd_len = snprintf(cmd_buf, sizeof(cmd_buf), "%06llX", (unsigned long long)opt.acfg.ac_addr);
+            } else if (c == 'a' && opt.acfg.ac_callsign[0]) {
+                cmd_len = snprintf(cmd_buf, sizeof(cmd_buf), "%s", opt.acfg.ac_callsign);
+            }
+            cmd_msg[0] = 0;
+            continue;
+        }
         struct gain g = cur_gain;
         bool manual = true;
         switch (c) {
@@ -438,9 +447,14 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
         case '-': case '_': if (g.vga > 0) g.vga -= 2; break;
         case 'L': if (g.lna < 40) g.lna += 8; break;
         case 'l': if (g.lna > 0) g.lna -= 8; break;
-        case 'a': case 'A': g.amp = !g.amp; break;
+        case 'p': case 'P': g.amp = !g.amp; break;
         case 'g': case 'G': opt.agc = !opt.agc; agc_low_count = 0; manual = false; break;
-        case 'r': case 'R': analysis_init(&opt.acfg); analysis_set_gain(gain_total(cur_gain)); manual = false; break;
+        case 'x': case 'X':
+            analysis_init(&opt.acfg);
+            analysis_set_gain(gain_total(cur_gain));
+            snprintf(cmd_msg, sizeof(cmd_msg), "statistics reset");
+            manual = false;
+            break;
         default: manual = false;
         }
         if (manual) {
@@ -448,7 +462,8 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             set_gain(dev, g, "manual");
         }
     }
-    ri->cmd_mode = cmd_mode;
+    ri->cmd_mode = edit_kind != 0;
+    ri->cmd_kind = edit_kind;
     snprintf(ri->cmd, sizeof(ri->cmd), "%.*s", cmd_len, cmd_buf);
     snprintf(ri->cmd_msg, sizeof(ri->cmd_msg), "%s", cmd_msg);
     return redraw;
@@ -504,8 +519,8 @@ static void usage(void)
 "      --tcas             include TCAS/ACAS in --list output\n"
 "  -d, --dashboard        dashboard also in --file mode (default: summary only)\n"
 "  -q, --quiet            no live output; summary at exit\n\n"
-"Keys (dashboard): q quit, +/- VGA, L/l LNA, a amp (any of these: manual gain), g auto gain,\n"
-"                  r reset statistics\n");
+"Keys (dashboard): q quit, +/- VGA, L/l LNA, p RF amp (any of these: manual gain), g auto gain,\n"
+"                  r radar filter, a aircraft filter (type it, Enter; empty clears), x reset statistics\n");
 }
 
 int main(int argc, char **argv)
