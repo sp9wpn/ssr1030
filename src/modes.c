@@ -184,7 +184,7 @@ static const char *labels[K_COUNT] = {
 };
 static const char *tokens[K_COUNT] = {
     "1", "2", "AA", "B", "CC", "D", "A", "C", "As", "Cs", "I?",
-    "S-acas", "S-alt", "S-sqk", "S", "S-acasL", "S-mil", "S-msg", "S-msg", "S-elm", "S-?", "S-sls"
+    "S-acas", "alt", "sqk", "S", "S-acasL", "S-mil", "S-msg", "S-msg", "S-elm", "S-?", "S-sls"
 };
 
 static const char *names[K_COUNT] = {
