@@ -109,7 +109,7 @@ struct analysis_cfg {
     /* filters */
     int radar_sel;         /* radar code to keep, -1 = all */
     bool modes_only;       /* drop Mode A/C and intermode interrogations */
-    bool ac_only;          /* keep only Mode A/C and intermode interrogations (opposite of modes_only) */
+    bool ac_only;          /* keep only A/C-only all-calls (short P4) */
     bool rollcall_only;    /* keep only interrogations addressed to an aircraft */
     int nac;               /* aircraft to keep (0 = all) */
     struct ac_sel ac[AC_MAX];
