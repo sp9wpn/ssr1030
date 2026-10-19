@@ -309,9 +309,10 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         printf(B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R EL,
                ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
     else if (ri->cmd_msg[0])
-        printf(YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  x reset" R EL, ri->cmd_msg);
+        printf(YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  x reset" R EL,
+               ri->cmd_msg);
     else printf(DIM "keys: q quit  +/- VGA  L/l LNA  p RF amp (manual)  g auto gain  r radar filter  a aircraft filter  "
-                "x reset stats" R EL);
+                "S Mode S only  R roll-calls only  x reset stats" R EL);
     fputs("\033[J", stdout);
     fflush(stdout);
 }

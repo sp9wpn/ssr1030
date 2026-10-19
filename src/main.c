@@ -41,7 +41,7 @@ static struct {
 } opt = {
     .freq = 1030e6, .fs = 16e6, .lna = 32, .vga = 24, .amp = 0,
     .thr_db = 12, .dens_max = 50, .sep = ',',
-    .adsb_every = 30, .adsb_dwell = 2.0, .lol_radius = 150,
+    .adsb_every = 30, .adsb_dwell = 2.9, .lol_radius = 150,
     .agc = true,
     .acfg = { .burst_gap = 0.030, .burst_min = 3, .member_db = 3, .core_db = 6,
               .radar_sel = -1, .ac_addr = -1 },
@@ -449,6 +449,16 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
         case 'l': if (g.lna > 0) g.lna -= 8; break;
         case 'p': case 'P': g.amp = !g.amp; break;
         case 'g': case 'G': opt.agc = !opt.agc; agc_low_count = 0; manual = false; break;
+        case 'S':
+            opt.acfg.modes_only = !opt.acfg.modes_only;
+            apply_filters(ri, opt.acfg.modes_only ? "Mode S only ON (non-Mode S dropped)" : "Mode S only OFF");
+            manual = false;
+            break;
+        case 'R':
+            opt.acfg.rollcall_only = !opt.acfg.rollcall_only;
+            apply_filters(ri, opt.acfg.rollcall_only ? "roll-calls only ON (all-calls dropped)" : "roll-calls only OFF");
+            manual = false;
+            break;
         case 'x': case 'X':
             analysis_init(&opt.acfg);
             analysis_set_gain(gain_total(cur_gain));
@@ -497,7 +507,7 @@ static void usage(void)
 "ADS-B callsigns (1090 MHz, HackRF retunes for short windows):\n"
 "  -B, --adsb             listen on 1090 periodically to map addresses to callsigns\n"
 "      --adsb-every S     minimum time between windows (default 30)\n"
-"      --adsb-dwell S     window length (default 2.0); windows are placed right after a\n"
+"      --adsb-dwell S     window length (default 2.9); windows are placed right after a\n"
 "                         main-beam burst when the rotation is known, so no burst is lost\n"
 "      --adsb-db PATH     load/save the address-callsign table (works with --file too)\n"
 "      --adsblol LAT,LON  at startup, fetch hex/callsign pairs of all aircraft around this\n"
@@ -520,7 +530,8 @@ static void usage(void)
 "  -d, --dashboard        dashboard also in --file mode (default: summary only)\n"
 "  -q, --quiet            no live output; summary at exit\n\n"
 "Keys (dashboard): q quit, +/- VGA, L/l LNA, p RF amp (any of these: manual gain), g auto gain,\n"
-"                  r radar filter, a aircraft filter (type it, Enter; empty clears), x reset statistics\n");
+"                  r radar filter, a aircraft filter (type it, Enter; empty clears),\n"
+"                  S Mode S only on/off, R roll-calls only on/off, x reset statistics\n");
 }
 
 int main(int argc, char **argv)

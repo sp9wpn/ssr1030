@@ -50,7 +50,7 @@ Per-burst counts, sequences, dwell and rotation are computed only from interroga
 
 ## ADS-B callsigns
 
-`-B, --adsb` retunes the HackRF to 1090 MHz for `--adsb-dwell` seconds (default 2) at most every `--adsb-every` seconds (default 30).
+`-B, --adsb` retunes the HackRF to 1090 MHz for `--adsb-dwell` seconds (default 2.9) at most every `--adsb-every` seconds (default 30).
 
 - **Timing:** once the rotation is known, a window starts right after a main-beam pass and ends before the next one, so no burst is lost. A burst that does touch a window is marked `*` and excluded from per-burst statistics.
 - **Sources:**
@@ -71,13 +71,15 @@ Dashboard keys:
 | `g` | Automatic gain on/off |
 | `r` | Radar filter: type an SI code (`SI1`–`SI63`) or II code (`II0`–`II15`), then `Enter` |
 | `a` | Aircraft filter: type a hex address or a callsign, then `Enter` |
+| `S` | Mode S only on/off (same as `-S`) |
+| `R` | Roll-calls only on/off (same as `-R`) |
 | `x` | Reset statistics |
 
 - **Manual gain:** `+ - L l p` switch the gain to manual.
 - **Filter input:** `r` and `a` open an input line pre-filled with the current filter.
   - An empty line removes the filter.
   - `Esc` cancels, `Backspace` edits, `Ctrl-U` clears the line.
-- **Statistics:** a filter change resets them, so counts from different filters never mix. This also works when replaying with `-f … -d`.
+- **Statistics:** any filter change (`r`, `a`, `S`, `R`) resets them, so counts from different filters never mix. This also works when replaying with `-f … -d`.
 
 Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coincidences of unrelated pulses.
 
