@@ -153,7 +153,7 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
     +47.23 ms  AA                     -20.1 ▒▒▒
 ```
 
-- **Each row:** time relative to the middle of the beam pass, query token (12 characters), target (8 characters: callsign when known, else hex address), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
+- **Each row:** time relative to the middle of the beam pass, amplitude = P6 for Mode S and P1 for A/C, query token (12 characters), target (8 characters: callsign when known, else hex address), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
 - **Bar character:**
   - `█` in-beam query
   - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
@@ -216,8 +216,12 @@ The interleaving statistics use the same tokens, without the target numbers.
 
 ## Log columns
 
-`t_s utc kind uf amp_dbfs gain_db rx_db p2_rel_db p5_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds sync quality hex`
+`t_s utc kind uf amp_dbfs p1_dbfs p6_dbfs gain_db rx_db p2_rel_db p5_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds sync quality hex`
 
+- `amp_dbfs` is the query amplitude: P6 for Mode S, P1 for A/C.
+  - P6 is the 70th percentile of the plateau, excluding the P5 window. It is 16–30 µs long, so much less noisy than the 0.8 µs P1.
+  - `p1_dbfs` and `p6_dbfs` are both logged.
+- `p2_rel_db` is P2 − P1. `p5_rel_db` is P5 − P6, so ≥ 0 means sidelobe (the transponder rule).
 - `burst` is -1 outside a main-beam burst.
 - `radar` is the attributed radar code, or `-` when unknown.
 - `quality` is the weakest DPSK bit confidence (0–1).

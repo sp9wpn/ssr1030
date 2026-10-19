@@ -135,6 +135,24 @@ static void p5_fit(struct demod *d, double center, float *p5, float *p6, double 
     }
 }
 
+/* P6 level: 70th percentile of the plateau magnitude, leaving out the
+ * edges and the P5 window around the sync (centre ts); the percentile
+ * skips the dips at phase reversals. */
+static float p6_level(struct demod *d, double p6lead, double p6width, double ts)
+{
+    uint64_t a = (uint64_t)llround(p6lead + 0.3 * d->spus);
+    uint64_t b = (uint64_t)llround(p6lead + (p6width - 0.3) * d->spus);
+    double x0 = ts - 0.45 * d->spus, x1 = ts + 0.45 * d->spus;
+    int n = 0;
+    for (uint64_t k = a; k < b && n < d->max_len; k++) {
+        if ((double)k > x0 && (double)k < x1) continue;
+        d->tmp[n++] = M(d, k);
+    }
+    if (n < 8) return 0;
+    qsort(d->tmp, n, sizeof(float), cmpf);
+    return d->tmp[(n * 7) / 10];
+}
+
 static void decode_modes(struct demod *d, struct interrog *it, double p6lead, double p6width)
 {
     double chip = 0.25 * d->spus;
@@ -175,7 +193,9 @@ static void decode_modes(struct demod *d, struct interrog *it, double p6lead, do
         float p5, p6;
         double tau;
         p5_fit(d, exp_sync, &p5, &p6, &tau);
-        it->p5_db = p5 >= d->thr ? dbfs(p5) : NAN;     /* absolute here, made relative to P1 by the caller */
+        float p6lvl = p6_level(d, p6lead, p6width, tau);
+        it->p6_db = p6lvl > 0 ? dbfs(p6lvl) : NAN;
+        it->p5_db = p5 >= d->thr && p6lvl > 0 ? dbfs(p5) - it->p6_db : NAN;   /* relative to P6 */
         if (!isnan(it->p5_db) && p5 >= p6) {
             /* transponder rule: P5 at least as strong as P6 = sidelobe. A
              * transponder would not reply, but the data chips after P5 are intact */
@@ -288,7 +308,8 @@ static void emit(struct demod *d, struct interrog *it, const struct pulse *p1)
 {
     it->seq = d->seq++;
     it->t = p1->lead / d->fs;
-    it->amp_db = dbfs(p1->amp);
+    it->p1_db = dbfs(p1->amp);
+    it->amp_db = isnan(it->p6_db) ? it->p1_db : it->p6_db;   /* Mode S: P6 (longer, less noisy) */
     it->burst = -1;
     d->cb(it, d->ctx);
 }
@@ -303,6 +324,7 @@ static void match(struct demod *d, uint64_t i)
     memset(&it, 0, sizeof(it));
     it.p2_db = NAN;
     it.p5_db = NAN;
+    it.p6_db = NAN;
 
     /* --- Mode S: P1, P2 @2.0, P6 @3.5 --- */
     int j2 = find_at(d, i, 2.0, 0.2, true);
@@ -325,7 +347,6 @@ static void match(struct demod *d, uint64_t i)
                 struct pulse *p2 = &d->q[(i + j2) & QMASK];
                 it.p2_db = 20.0f * log10f(p2->amp / p1->amp);
                 decode_modes(d, &it, p6->lead, w6);
-                if (!isnan(it.p5_db)) it.p5_db -= dbfs(p1->amp);
                 p1->used = p2->used = true;
                 for (uint64_t k = i + j6; k <= last; k++) d->q[k & QMASK].used = true;
                 emit(d, &it, p1);
