@@ -219,7 +219,7 @@ static const char *bds_abbrev(int b)
     case 0x21: return "reg";       /* registration */
     case 0x25: return "type";      /* aircraft type */
     case 0x30: return "ra";        /* ACAS resolution advisory */
-    case 0x40: return "setAlt";      /* selected vertical intention (selected altitude) */
+    case 0x40: return "selAlt";      /* selected vertical intention (selected altitude) */
     case 0x41: case 0x42: case 0x43: return "wpt";
     case 0x44: return "met";       /* meteorological routine report */
     case 0x45: return "haz";       /* meteorological hazard report */
@@ -255,7 +255,7 @@ const char *seq_token_str(uint16_t t, char *buf, size_t len)
         snprintf(buf, len, "%s", kind_token(k));
         return buf;
     }
-    /* named registers are shown bare (call, setAlt, hdgSpd...), others as S-bXY */
+    /* named registers are shown bare (call, selAlt, hdgSpd...), others as S-bXY */
     char hx[8];
     const char *a = bds_abbrev(x - 1);
     bool named = a != NULL;

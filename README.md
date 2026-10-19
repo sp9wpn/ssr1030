@@ -148,7 +148,7 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 
 ```
    -262.58 ms  AA                     -18.5 ░░░░░░░           P2
-    -36.42 ms  setAlt       4A2182     -9.1 ████████████P5█████████████████
+    -36.42 ms  selAlt       4A2182     -9.1 ████████████P5█████████████████
     -23.35 ms  A                        1.2 ██P2█████████████████████████████████████████████████████
     +47.23 ms  AA                     -20.1 ▒▒▒
 ```
@@ -186,7 +186,7 @@ They are left out of all radar analysis.
   - `AA/CC`, `A/C`, `ACSall`: plain Mode A/C, A/C-only all-calls, A/C/S all-calls.
   - `S`: UF11 all-calls.
   - `alt`, `sqk`: UF4 and UF5 roll-calls without a Comm-B request.
-  - `acid`, `setAlt`, `trk`, `hdgSpd`: Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
+  - `acid`, `selAlt`, `trk`, `hdgSpd`: Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
   - `oBDS`: any other BDS.
   - `msg`: Comm-A without a request.
   - `other`: UF24, UF19 and the rest.
@@ -200,14 +200,14 @@ They are left out of all radar analysis.
 | `As` `Cs` | A/C/S all-call (long P4) |
 | `S` | UF11 Mode S all-call (acquisition) |
 | `alt` / `sqk` | UF4 altitude / UF5 Mode A code roll-call, no Comm-B |
-| `acid` `setAlt` `trk` `hdgSpd` | Roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
+| `acid` `selAlt` `trk` `hdgSpd` | Roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
 | `cap` `gicb` `pos` `met` `ra` `aicb` … | BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
 | `S-msg` | Comm-A UF20/21 (`S-msg/hdgSpd` = also requests BDS 6,0) |
 | `S-elm` `S-mil` | UF24 ELM, UF19 |
 | `S-sls` | Mode S sidelobe (P5 ≥ P6) whose bits could not be recovered. Normally sidelobe Mode S is fully decoded and shown with its own token and the SLS flag |
 | `S-grb` | Mode S with no sync reversal and no P5 (garbled) |
 
-Roll-calls carry the number of their target, for example `alt/1` or `setAlt/2#2`.
+Roll-calls carry the number of their target, for example `alt/1` or `selAlt/2#2`.
 Targets are listed under the sequence, numbered in alphabetical order of their callsign or hex: `targets: 1/452124 2/DLH123`.
 
 The interleaving statistics use the same tokens, without the target numbers.
