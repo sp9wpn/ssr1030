@@ -44,7 +44,7 @@ static struct {
     .adsb_every = 30, .adsb_dwell = 2.9, .lol_radius = 150,
     .agc = true,
     .acfg = { .burst_gap = 0.030, .burst_min = 3, .member_db = 3, .core_db = 6,
-              .radar_sel = -1, .ac_addr = -1 },
+              .radar_sel = -1 },
 };
 
 /* ---------- ring buffer between libhackrf thread and main thread ---------- */
@@ -295,21 +295,13 @@ static void kb_restore(void)
     if (tio_raw) tcsetattr(0, TCSANOW, &tio_saved);
 }
 
-static bool parse_aircraft(const char *s)
+static bool parse_aircraft(const char *s, char *bad, size_t badlen)
 {
-    opt.acfg.ac_addr = -1;
-    opt.acfg.ac_callsign[0] = 0;
-    if (!strncasecmp(s, "cs:", 3)) {
-        snprintf(opt.acfg.ac_callsign, sizeof(opt.acfg.ac_callsign), "%s", s + 3);
-    } else {
-        const char *h = !strncasecmp(s, "0x", 2) ? s + 2 : s;
-        bool hex = strlen(h) == 6;
-        for (int k = 0; hex && k < 6; k++) hex = isxdigit((unsigned char)h[k]);
-        if (hex) opt.acfg.ac_addr = strtol(h, NULL, 16);
-        else if (strlen(s) <= 8) snprintf(opt.acfg.ac_callsign, sizeof(opt.acfg.ac_callsign), "%s", s);
-        else return false;
-    }
-    for (char *p = opt.acfg.ac_callsign; *p; p++) *p = toupper((unsigned char)*p);
+    struct ac_sel tmp[AC_MAX];
+    int n = ac_list_parse(s, tmp, bad, badlen);
+    if (n < 0) return false;
+    memcpy(opt.acfg.ac, tmp, sizeof(tmp));
+    opt.acfg.nac = n;
     return true;
 }
 
@@ -324,14 +316,16 @@ static void build_filters(char *buf, size_t n)
     }
     if (opt.acfg.modes_only) o += snprintf(buf + o, n - o, "Mode S only  ");
     if (opt.acfg.rollcall_only) o += snprintf(buf + o, n - o, "roll-calls only  ");
-    if (opt.acfg.ac_addr >= 0)
-        o += snprintf(buf + o, n - o, "aircraft %06llX  ", (unsigned long long)opt.acfg.ac_addr);
-    if (opt.acfg.ac_callsign[0]) o += snprintf(buf + o, n - o, "aircraft %s  ", opt.acfg.ac_callsign);
+    if (opt.acfg.nac) {
+        char l[160];
+        ac_list_str(&opt.acfg, false, l, sizeof(l));
+        o += snprintf(buf + o, n - o, "aircraft %s  ", l);
+    }
 }
 
 /* ---------- filter input line ('r' radar, 'a' aircraft; empty clears) ---------- */
 static char edit_kind;                /* 'r', 'a' or 0 when not editing */
-static char cmd_buf[64];
+static char cmd_buf[160];
 static int cmd_len;
 static char cmd_msg[160];
 
@@ -348,7 +342,7 @@ static void apply_input(struct run_info *ri, char kind, char *arg)
     while (*arg == ' ') arg++;
     char *e = arg + strlen(arg);
     while (e > arg && e[-1] == ' ') *--e = 0;
-    char m[64];
+    char m[160];
     if (kind == 'r') {
         if (!*arg) { opt.acfg.radar_sel = -1; apply_filters(ri, "radar filter cleared"); return; }
         int code = radar_code_parse(arg);
@@ -360,26 +354,18 @@ static void apply_input(struct run_info *ri, char kind, char *arg)
         apply_filters(ri, m);
     } else {
         if (!*arg) {
-            opt.acfg.ac_addr = -1;
-            opt.acfg.ac_callsign[0] = 0;
+            opt.acfg.nac = 0;
             apply_filters(ri, "aircraft filter cleared");
             return;
         }
-        int64_t old_addr = opt.acfg.ac_addr;
-        char old_cs[9];
-        snprintf(old_cs, sizeof(old_cs), "%s", opt.acfg.ac_callsign);
-        if (!parse_aircraft(arg)) {
-            opt.acfg.ac_addr = old_addr;
-            snprintf(opt.acfg.ac_callsign, sizeof(opt.acfg.ac_callsign), "%s", old_cs);
-            snprintf(cmd_msg, sizeof(cmd_msg), "bad aircraft '%s' (6 hex digits or callsign), filter unchanged", arg);
+        char bad[64];
+        if (!parse_aircraft(arg, bad, sizeof(bad))) {
+            snprintf(cmd_msg, sizeof(cmd_msg), "bad aircraft %s (hex or callsign list), filter unchanged", bad);
             return;
         }
-        if (opt.acfg.ac_addr >= 0) snprintf(m, sizeof(m), "aircraft filter %06llX", (unsigned long long)opt.acfg.ac_addr);
-        else {
-            int64_t a = cs_find(opt.acfg.ac_callsign);
-            if (a >= 0) snprintf(m, sizeof(m), "aircraft filter %s = %06llX", opt.acfg.ac_callsign, (unsigned long long)a);
-            else snprintf(m, sizeof(m), "aircraft filter %s (address not known yet)", opt.acfg.ac_callsign);
-        }
+        char l[120];
+        ac_list_str(&opt.acfg, true, l, sizeof(l));
+        snprintf(m, sizeof(m), "aircraft filter %s", l);
         apply_filters(ri, m);
     }
 }
@@ -431,10 +417,9 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             if (c == 'r' && opt.acfg.radar_sel >= 0) {
                 radar_code_str(opt.acfg.radar_sel, cmd_buf, sizeof(cmd_buf));
                 cmd_len = strlen(cmd_buf);
-            } else if (c == 'a' && opt.acfg.ac_addr >= 0) {
-                cmd_len = snprintf(cmd_buf, sizeof(cmd_buf), "%06llX", (unsigned long long)opt.acfg.ac_addr);
-            } else if (c == 'a' && opt.acfg.ac_callsign[0]) {
-                cmd_len = snprintf(cmd_buf, sizeof(cmd_buf), "%s", opt.acfg.ac_callsign);
+            } else if (c == 'a' && opt.acfg.nac) {
+                ac_list_str(&opt.acfg, false, cmd_buf, sizeof(cmd_buf));
+                cmd_len = strlen(cmd_buf);
             }
             cmd_msg[0] = 0;
             continue;
@@ -501,8 +486,9 @@ static void usage(void)
 "  -S, --modes-only       drop Mode A/C and intermode (A/C-only, A/C/S all-call) interrogations\n"
 "  -R, --rollcall-only    keep only interrogations addressed to an aircraft (UF4/5/20/21/24/19):\n"
 "                         drops UF11 and A/C/intermode all-calls and plain Mode A/C\n"
-"  -A, --aircraft ID      keep only interrogations addressed to one aircraft: 6 hex digits\n"
-"                         (48AF01) or a callsign (LOT3KM; needs --adsb or --adsb-db).\n"
+"  -A, --aircraft LIST    keep only interrogations addressed to these aircraft: up to 16 hex\n"
+"                         addresses (48AF01) or callsigns (LOT3KM; needs --adsb/--adsblol),\n"
+"                         separated by commas or spaces: -A 48AF01,LOT3KM,DLH123\n"
 "                         Prefix with cs: to force a callsign that looks like hex\n\n"
 "ADS-B callsigns (1090 MHz, HackRF retunes for short windows):\n"
 "  -B, --adsb             listen on 1090 periodically to map addresses to callsigns\n"
@@ -582,7 +568,10 @@ int main(int argc, char **argv)
         case 'S': opt.acfg.modes_only = true; break;
         case 'R': opt.acfg.rollcall_only = true; break;
         case 'A':
-            if (!parse_aircraft(optarg)) { fprintf(stderr, "bad aircraft '%s'\n", optarg); return 1; }
+            {
+                char bad[64];
+                if (!parse_aircraft(optarg, bad, sizeof(bad))) { fprintf(stderr, "bad aircraft %s\n", bad); return 1; }
+            }
             break;
         case 'B': opt.adsb = true; break;
         case 12: opt.adsb_every = atof(optarg); break;
@@ -605,7 +594,9 @@ int main(int argc, char **argv)
     bool live = opt.file == NULL;
     bool dash = !opt.list && !opt.quiet && (live || opt.dashboard);
     if (opt.adsb && !live) { fprintf(stderr, "--adsb needs the HackRF; ignored in --file mode\n"); opt.adsb = false; }
-    if (opt.acfg.ac_callsign[0] && !opt.adsb && !opt.adsb_db && !opt.lol)
+    bool any_cs = false;
+    for (int k = 0; k < opt.acfg.nac; k++) if (opt.acfg.ac[k].addr < 0) any_cs = true;
+    if (any_cs && !opt.adsb && !opt.adsb_db && !opt.lol)
         fprintf(stderr, "warning: callsign filter without --adsb, --adsblol or --adsb-db can never resolve\n");
     if (opt.lol_radius < 1) opt.lol_radius = 1;
     if (opt.lol_radius > 250) opt.lol_radius = 250;            /* API maximum */

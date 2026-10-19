@@ -163,7 +163,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     else printf(GRN "  level OK" R DIM " - peak %.1f dB above noise over %.0f s, no clipping" R EL,
                 peak_w - st.noise_dbfs, win);
     {
-        char fl[200];
+        char fl[360];
         int o = snprintf(fl, sizeof(fl), "Filters: %s", ri->filters[0] ? ri->filters : "none");
         if (AS.filt_radar || AS.filt_modes || AS.filt_rollcall || AS.filt_aircraft)
             snprintf(fl + o, sizeof(fl) - o, "  (dropped: radar %ld, non-S %ld, all-call %ld, aircraft %ld)",

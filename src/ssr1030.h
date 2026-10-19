@@ -98,6 +98,9 @@ bool kind_is_modes(int k);
 bool kind_is_allcall(int k);
 
 /* ---- analysis.c ---- */
+#define AC_MAX 16
+struct ac_sel { int64_t addr; char cs[9]; };   /* hex address (addr >= 0) or callsign */
+
 struct analysis_cfg {
     double burst_gap;      /* s: silence that closes a burst */
     int burst_min;         /* minimum interrogations for a burst */
@@ -107,8 +110,8 @@ struct analysis_cfg {
     int radar_sel;         /* radar code to keep, -1 = all */
     bool modes_only;       /* drop Mode A/C and intermode interrogations */
     bool rollcall_only;    /* keep only interrogations addressed to an aircraft */
-    int64_t ac_addr;       /* aircraft address to keep, -1 = all */
-    char ac_callsign[9];   /* or callsign, resolved through the ADS-B table */
+    int nac;               /* aircraft to keep (0 = all) */
+    struct ac_sel ac[AC_MAX];
 };
 void analysis_init(const struct analysis_cfg *cfg);
 void analysis_set_floor(double thr_dbfs);
@@ -123,7 +126,8 @@ int analysis_main_code(void);               /* selected radar, else the one with
 void analysis_gain_shift(float delta_db);   /* receiver gain changed: shift background levels */
 void analysis_set_gain(float gain_db);      /* nominal gain, stamped on committed bursts */
 bool analysis_addr_known(uint32_t addr);    /* address was roll-called */
-int64_t analysis_target_addr(void);         /* resolved --aircraft address, -1 none/unknown */
+int ac_list_parse(const char *s, struct ac_sel *out, char *bad, size_t badlen);  /* count, -1 on error */
+void ac_list_str(const struct analysis_cfg *c, bool resolved, char *buf, size_t n); /* "48AF01,LOT3KM=4A2182" */
 
 /* ---- adsb.c ---- */
 struct adsb_stats {
@@ -155,11 +159,11 @@ struct run_info {
     bool adsb;             /* ADS-B windows enabled */
     bool adsb_now;         /* currently listening on 1090 */
     double adsb_next;      /* seconds until the next window (approx.), <0 waiting for burst */
-    char filters[160];
+    char filters[256];
     bool agc;              /* automatic gain */
     bool cmd_mode;         /* filter input line open */
     char cmd_kind;         /* 'r' radar or 'a' aircraft */
-    char cmd[64];
+    char cmd[160];
     char cmd_msg[160];     /* result of the last command */
     double gain_age;       /* seconds since the last gain change, <0 never */
     int gain_delta;        /* last change, dB */

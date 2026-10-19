@@ -26,6 +26,7 @@ make
 ./ssr1030 -B                       # learn callsigns from ADS-B (1090) windows (kept in memory)
 ./ssr1030 -r SI17 -R               # only roll-calls of SI17 (no all-calls)
 ./ssr1030 -A 48AF01                # only interrogations addressed to one aircraft
+./ssr1030 -A 48AF01,LOT3KM,DLH123  # ... or to any of several
 ./ssr1030 -A LOT3KM -B             # same, by callsign
 ./ssr1030 --adsblol 52.23,21.01    # preload callsigns of aircraft within 150 NM from adsb.lol
 ```
@@ -41,9 +42,10 @@ These apply to statistics, bursts, the log and `--list`. TCAS stays a separate s
   - Anything left unattributed is dropped.
 - `-S, --modes-only`: drops plain Mode A/C and intermode (A/C-only and A/C/S all-calls).
 - `-R, --rollcall-only`: keeps only interrogations addressed to an aircraft (UF4/5/20/21/24/19). It drops UF11 `S`, all intermode all-calls and plain Mode A/C.
-- `-A, --aircraft ID`: keeps only interrogations addressed to one aircraft (UF0/4/5/16/19/20/21/24).
-  - `ID` is 6 hex digits or a callsign. Use `cs:` to force a callsign that looks like hex.
-  - A callsign resolves once the ADS-B table knows it.
+- `-A, --aircraft LIST`: keeps only interrogations addressed to the listed aircraft (UF0/4/5/16/19/20/21/24).
+  - `LIST` holds up to 16 entries separated by commas, spaces or semicolons, for example `-A 48AF01,LOT3KM,DLH123`.
+  - Each entry is 6 hex digits or a callsign. Use `cs:` to force a callsign that looks like hex.
+  - A callsign resolves once the callsign table knows it. Until then the summary shows it as `LOT3KM(?)`.
 
 Burst detection still uses all interrogations, because the beam is physical.
 Per-burst counts, sequences, dwell and rotation are computed only from interrogations that pass the filters.
@@ -70,7 +72,7 @@ Dashboard keys:
 | `p` | RF amp on/off |
 | `g` | Automatic gain on/off |
 | `r` | Radar filter: type an SI code (`SI1`–`SI63`) or II code (`II0`–`II15`), then `Enter` |
-| `a` | Aircraft filter: type a hex address or a callsign, then `Enter` |
+| `a` | Aircraft filter: type hex addresses or callsigns (list separated by commas or spaces), then `Enter` |
 | `S` | Mode S only on/off (same as `-S`) |
 | `R` | Roll-calls only on/off (same as `-R`) |
 | `x` | Reset statistics |

@@ -103,7 +103,7 @@ struct analysis_state {
     struct addr_entry addrs[ADDR_HASH];
     int naddr_radar, naddr_tcas;
 
-    int64_t target;             /* resolved --aircraft address */
+    int64_t tgt[AC_MAX];        /* resolved --aircraft addresses, -1 unknown */
     float gain_db;              /* current nominal receiver gain */
     double gap_end;
 

@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <ctype.h>
 #include "analysis.h"
 
 #define LOOKAHEAD   0.3
@@ -103,7 +104,7 @@ void analysis_init(const struct analysis_cfg *cfg)
     AS.prev_tok = -1;
     AS.last_burst_end = -1;
     AS.gap_end = -1e9;
-    AS.target = cfg->ac_addr;
+    for (int k = 0; k < AC_MAX; k++) AS.tgt[k] = k < cfg->nac ? cfg->ac[k].addr : -1;
     target_ver = ~0u;
 }
 
@@ -193,18 +194,63 @@ void analysis_gain_shift(float delta)
     for (int k = 0; k < NBINS; k++) bins[k] += delta;
     AS.bg_db += delta;
 }
-int64_t analysis_target_addr(void) { return AS.target; }
 
 /* ---------------- filters ---------------- */
 
-static bool aircraft_filter_on(void) { return AS.cfg.ac_addr >= 0 || AS.cfg.ac_callsign[0]; }
+static bool aircraft_filter_on(void) { return AS.cfg.nac > 0; }
 
 static void resolve_target(void)
 {
-    if (AS.cfg.ac_addr >= 0 || !AS.cfg.ac_callsign[0]) return;
-    if (cs_version() == target_ver) return;
+    if (!AS.cfg.nac || cs_version() == target_ver) return;
     target_ver = cs_version();
-    AS.target = cs_find(AS.cfg.ac_callsign);
+    for (int k = 0; k < AS.cfg.nac; k++)
+        AS.tgt[k] = AS.cfg.ac[k].addr >= 0 ? AS.cfg.ac[k].addr : cs_find(AS.cfg.ac[k].cs);
+}
+
+int ac_list_parse(const char *s, struct ac_sel *out, char *bad, size_t badlen)
+{
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%s", s);
+    int n = 0;
+    for (char *t = strtok(buf, " ,;\t"); t; t = strtok(NULL, " ,;\t")) {
+        if (n == AC_MAX) { snprintf(bad, badlen, "more than %d aircraft", AC_MAX); return -1; }
+        struct ac_sel *e = &out[n];
+        e->addr = -1;
+        e->cs[0] = 0;
+        const char *cs = NULL;
+        if (!strncasecmp(t, "cs:", 3)) cs = t + 3;
+        else {
+            const char *h = !strncasecmp(t, "0x", 2) ? t + 2 : t;
+            bool hex = strlen(h) == 6;
+            for (int k = 0; hex && k < 6; k++) hex = isxdigit((unsigned char)h[k]);
+            if (hex) e->addr = strtol(h, NULL, 16);
+            else cs = t;
+        }
+        if (cs) {
+            if (!*cs || strlen(cs) > 8) { snprintf(bad, badlen, "'%s'", t); return -1; }
+            for (int k = 0; cs[k]; k++) e->cs[k] = toupper((unsigned char)cs[k]);
+            e->cs[strlen(cs)] = 0;
+        }
+        n++;
+    }
+    return n;
+}
+
+void ac_list_str(const struct analysis_cfg *c, bool resolved, char *buf, size_t n)
+{
+    size_t o = 0;
+    buf[0] = 0;
+    for (int k = 0; k < c->nac && o + 1 < n; k++) {
+        const struct ac_sel *e = &c->ac[k];
+        const char *sep = k ? "," : "";
+        if (e->addr >= 0) o += snprintf(buf + o, n - o, "%s%06llX", sep, (unsigned long long)e->addr);
+        else if (!resolved) o += snprintf(buf + o, n - o, "%s%s", sep, e->cs);
+        else {
+            int64_t a = cs_find(e->cs);
+            if (a >= 0) o += snprintf(buf + o, n - o, "%s%s=%06llX", sep, e->cs, (unsigned long long)a);
+            else o += snprintf(buf + o, n - o, "%s%s(?)", sep, e->cs);
+        }
+    }
 }
 
 static bool directed(int k)
@@ -215,7 +261,10 @@ static bool directed(int k)
 
 static bool to_target(const struct interrog *x)
 {
-    return AS.target >= 0 && directed(x->kind) && x->addr == (uint32_t)AS.target;
+    if (!directed(x->kind)) return false;
+    for (int k = 0; k < AS.cfg.nac; k++)
+        if (AS.tgt[k] >= 0 && x->addr == (uint32_t)AS.tgt[k]) return true;
+    return false;
 }
 
 static bool passes(const struct interrog *x)
@@ -574,10 +623,9 @@ void analysis_print_summary(FILE *f)
         fprintf(f, "filtered out: other/unknown radar %ld, non-Mode S %ld, all-call/unaddressed %ld, other aircraft %ld\n",
                 AS.filt_radar, AS.filt_modes, AS.filt_rollcall, AS.filt_aircraft);
     if (aircraft_filter_on()) {
-        if (AS.target >= 0) fprintf(f, "aircraft filter: %06llX %s\n", (unsigned long long)AS.target,
-                                    cs_lookup((uint32_t)AS.target) ? cs_lookup((uint32_t)AS.target) : "");
-        else fprintf(f, "aircraft filter: callsign %s not resolved (no ADS-B identification seen)\n",
-                     AS.cfg.ac_callsign);
+        char l[512];
+        ac_list_str(&AS.cfg, true, l, sizeof(l));
+        fprintf(f, "aircraft filter: %s%s\n", l, strstr(l, "(?)") ? "   ((?) = callsign not resolved yet)" : "");
     }
     fprintf(f, "background (sidelobe) level %.1f dBFS, burst member >= %.1f dBFS, core >= %.1f dBFS\n\n",
             AS.bg_db, AS.bg_db + AS.cfg.member_db, AS.bg_db + AS.cfg.core_db);
