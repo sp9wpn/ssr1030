@@ -32,6 +32,7 @@ struct demod {
     float complex dc;
     float noise;                /* mean noise magnitude */
     float thr_db, thr_abs, thr;
+    float thr_sls;              /* P2/P5 presence at their known positions: noise + 6 dB */
     double nacc; uint64_t ncnt;
 
     int in_pulse;
@@ -195,7 +196,7 @@ static void decode_modes(struct demod *d, struct interrog *it, double p6lead, do
         p5_fit(d, exp_sync, &p5, &p6, &tau);
         float p6lvl = p6_level(d, p6lead, p6width, tau);
         it->p6_db = p6lvl > 0 ? dbfs(p6lvl) : NAN;
-        it->p5_db = p5 >= d->thr && p6lvl > 0 ? dbfs(p5) - it->p6_db : NAN;   /* relative to P6 */
+        it->p5_db = p5 >= d->thr_sls && p6lvl > 0 ? dbfs(p5) - it->p6_db : NAN;   /* relative to P6 */
         if (!isnan(it->p5_db) && p5 >= p6) {
             /* transponder rule: P5 at least as strong as P6 = sidelobe. A
              * transponder would not reply, but the data chips after P5 are intact */
@@ -281,6 +282,16 @@ static void decode_modes(struct demod *d, struct interrog *it, double p6lead, do
 }
 
 /* ---------------- pattern matcher ---------------- */
+
+/* median magnitude between two sample positions */
+static float slot_level(struct demod *d, double a, double b)
+{
+    int n = 0;
+    for (uint64_t k = (uint64_t)llround(a); k <= (uint64_t)llround(b) && n < 64; k++) d->tmp[n++] = M(d, k);
+    if (!n) return 0;
+    qsort(d->tmp, n, sizeof(float), cmpf);
+    return d->tmp[n / 2];
+}
 
 static inline double rel_us(struct demod *d, const struct pulse *a, const struct pulse *b)
 {
@@ -371,6 +382,11 @@ static void match(struct demod *d, uint64_t i)
             it.p2_db = 20.0f * log10f(p2->amp / p1->amp);
             if (it.p2_db >= 0) it.sidelobe = true;
             p2->used = true;
+        } else {
+            /* no P2 pulse detected: read the P2 slot directly (P2 is usually
+             * well below the pulse threshold in the main beam) */
+            float a2 = slot_level(d, p1->lead + 2.15 * d->spus, p1->lead + 2.65 * d->spus);
+            if (a2 >= d->thr_sls) it.p2_db = 20.0f * log10f(a2 / p1->amp);
         }
         int j4 = find_at(d, i, off3[m] + 2.0, 0.15, false);
         if (j4 > 0) {
@@ -482,6 +498,7 @@ void demod_process(struct demod *d, const int8_t *iq, size_t ns)
         d->noise = (float)(acc / ns);
     }
     d->thr = d->thr_abs > 0 ? d->thr_abs : d->noise * powf(10.0f, d->thr_db / 20.0f);
+    d->thr_sls = d->noise * 2.0f;
     float noise_cut = d->noise * 2.5f;
 
     for (size_t k = 0; k < ns; k++) {

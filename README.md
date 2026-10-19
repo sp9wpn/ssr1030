@@ -163,6 +163,8 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
   - Across ±0.35 µs around the expected sync, the signal is fitted as a constant P5 plus a P6 that changes sign once. The best split point is the reversal, and P5 = |mean before + mean after|/2, P6 = |mean before − mean after|/2.
   - This finds the reversal even when it falls between samples, and it also works when a strong P5 masks the sync.
   - In Mode S, P2 is part of the preamble, so it is not marked.
+  - P2 and P5 are read at their known positions (P2: P1 + 2.15–2.65 µs if no P2 pulse was detected; P5: the fit). They count as present at noise + 6 dB, below the normal pulse threshold.
+  - A bar without a marker at the beam peak is expected. The control antenna that sends P2/P5 has a notch on boresight, so there they fall below the noise.
 - **Sidelobe Mode S is decoded.** P5 ≥ P6 means a transponder would not reply (the query is not for us), but P5 covers only the sync reversal and the data chips after it are intact.
   - The bit timing is recovered within ±half a chip of the nominal sync, and the query is shown with its real type and target plus `sls`.
   - These queries carry their radar's SI/II code, so sidelobes are attributed to the radar too.
