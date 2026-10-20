@@ -520,7 +520,8 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         if ((int)strlen(buf) > cols - 1) buf[cols - 1] = 0;
         printf("%s" EL, buf);
     }
-    draw_status_line(ri, false);
-    fputs("\033[J", stdout);
+    fputs("\033[J", stdout);                   /* clear below the dashboard, then the last row */
+    printf("\033[%d;1H", term_rows());
+    draw_status_line(ri, true);
     fflush(stdout);
 }

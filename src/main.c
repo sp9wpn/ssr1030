@@ -492,7 +492,7 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
         case 'b': case 'B': show_graph = !show_graph; force_full = true; manual = false; break;
         case ' ':
             frozen = !frozen;
-            snprintf(cmd_msg, sizeof(cmd_msg), frozen ? "screen frozen, data collection continues" : "screen live again");
+            snprintf(cmd_msg, sizeof(cmd_msg), frozen ? "screen frozen, data collection continues" : "screen live");
             manual = false;
             break;
         case 'x': case 'X':
