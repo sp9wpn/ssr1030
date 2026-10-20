@@ -79,7 +79,7 @@ Dashboard keys:
 | `S` | Mode S only on/off (same as `-S`) |
 | `R` | Roll-calls only on/off (same as `-R`) |
 | `b` | Burst graph screen on/off (see below) |
-| `F` | Freeze the screen on/off: data collection continues. On the burst chart the shown burst is pinned and stays scrollable |
+| `space` | Freeze the screen on/off: data collection continues. On the burst chart the shown burst is pinned and stays scrollable |
 | `x` | Reset statistics |
 
 - **Manual gain:** `+ - L l p` switch the gain to manual.

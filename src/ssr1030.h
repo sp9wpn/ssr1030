@@ -168,7 +168,7 @@ struct run_info {
     char filters[256];
     bool agc;              /* automatic gain */
     bool graph;            /* burst graph screen instead of the dashboard */
-    bool frozen;           /* 'F': screen frozen, data collection continues */
+    bool frozen;           /* space: screen frozen, data collection continues */
     bool cmd_mode;         /* filter input line open */
     char cmd_kind;         /* 'r' radar or 'a' aircraft */
     char cmd[160];

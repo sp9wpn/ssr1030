@@ -117,13 +117,13 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
         snprintf(line + o, sizeof(line) - o, B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R,
                  ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
     else if (ri->cmd_msg[0])
-        snprintf(line + o, sizeof(line) - o, YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  b graph  F freeze  x reset" R,
+        snprintf(line + o, sizeof(line) - o, YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  b graph  space freeze  x reset" R,
                  ri->cmd_msg);
     else if (ri->graph)
         snprintf(line + o, sizeof(line) - o, DIM "keys: b dashboard  \u2191\u2193 PgUp PgDn Home End scroll  r radar filter  a aircraft filter  "
-                 "S Mode S only  R roll-calls only  F freeze  q quit" R);
+                 "S Mode S only  R roll-calls only  space freeze  q quit" R);
     else snprintf(line + o, sizeof(line) - o, DIM "keys: q quit  +/- VGA  L/l LNA (manual)  p RF amp  g auto gain  r radar filter  a aircraft filter  "
-                  "S Mode S only  R roll-calls only  b burst graph  F freeze  x reset stats" R);
+                  "S Mode S only  R roll-calls only  b burst graph  space freeze  x reset stats" R);
     /* on the last row one column stays free so the terminal never wraps/scrolls */
     put_cut(line, term_cols() - 1);
     fputs(last_row ? "\033[K" : EL, stdout);

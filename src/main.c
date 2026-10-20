@@ -354,7 +354,7 @@ static void build_filters(char *buf, size_t n)
 
 /* ---------- filter input line ('r' radar, 'a' aircraft; empty clears) ---------- */
 static bool show_graph;               /* 'b': burst graph screen */
-static bool frozen;                   /* 'F': freeze the screen */
+static bool frozen;                   /* space: freeze the screen */
 static bool force_full;               /* one full redraw (screen switched while frozen) */
 static char edit_kind;                /* 'r', 'a' or 0 when not editing */
 static char cmd_buf[160];
@@ -490,7 +490,7 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             manual = false;
             break;
         case 'b': case 'B': show_graph = !show_graph; force_full = true; manual = false; break;
-        case 'F':
+        case ' ':
             frozen = !frozen;
             snprintf(cmd_msg, sizeof(cmd_msg), frozen ? "screen frozen, data collection continues" : "screen live again");
             manual = false;
@@ -572,7 +572,7 @@ static void usage(void)
 "  -q, --quiet            no live output; summary at exit\n\n"
 "Keys (dashboard): q quit, +/- VGA, L/l LNA, p RF amp (any of these: manual gain), g auto gain,\n"
 "                  r radar filter, a aircraft filter (type it, Enter; empty clears),\n"
-"                  S Mode S only on/off, R roll-calls only on/off, b burst graph, F freeze screen,\n"
+"                  S Mode S only on/off, R roll-calls only on/off, b burst graph, space freeze screen,\n"
 "                  x reset statistics\n");
 }
 
