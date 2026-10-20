@@ -647,8 +647,10 @@ static void drain(int id, int code, bool valid, struct burst *rec)
     while (ot < oh) {
         struct interrog *y = &outq[ot++ % OUTQ];
         bool member = id >= 0 && y->burst == id;
-        if (member && !valid) y->burst = -1;
-        bool pass = stage2(y, member && valid ? code : -1);
+        /* plain A/C (no P4) never comes from a Mode S radar: those send A/C-only
+         * all-calls instead, so a plain A/C query in a coded burst is another radar */
+        if (member && (!valid || (code >= 0 && y->kind <= K_MODED))) { y->burst = -1; member = false; }
+        bool pass = stage2(y, member ? code : -1);
         if (!valid || !rec) continue;
         if (pass && member) {
             int ka = rec_add(rec, y);

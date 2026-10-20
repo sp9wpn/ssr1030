@@ -38,7 +38,8 @@ These apply to statistics, bursts, the log and `--list`. TCAS stays a separate s
 
 - `-r, --radar SI17|II3`: keeps one radar.
   - Mode S interrogations carry the code: UF11 has II/SI, and UF4/5/20/21 have SIS (DI=3) or IIS (DI=0/1/7).
-  - A/C and all-call interrogations are attributed through the main-beam burst they belong to. A burst gets the majority code of the interrogations inside it.
+  - All-call interrogations are attributed through the main-beam burst they belong to. A burst gets the majority code of the interrogations inside it.
+  - Plain Mode A/C (no P4) is never part of a burst that has a Mode S code, and is never attributed to it: a Mode S radar sends A/C-only all-calls instead, so plain A/C comes from another radar.
   - Outside bursts, an all-call is attributed if a UF11 was sent less than 300 µs before it.
   - Anything left unattributed is dropped.
 - `-S, --modes-only`: drops plain Mode A/C and intermode (A/C-only and A/C/S all-calls).
