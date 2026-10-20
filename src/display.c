@@ -112,7 +112,7 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
 {
     char line[512];
     int o = 0;
-    if (ri->frozen) o += snprintf(line + o, sizeof(line) - o, "\033[1;7m FROZEN (F) \033[0m ");
+    if (ri->frozen) o += snprintf(line + o, sizeof(line) - o, "\033[1;7m FROZEN \033[0m ");
     if (ri->cmd_mode)
         snprintf(line + o, sizeof(line) - o, B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R,
                  ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
