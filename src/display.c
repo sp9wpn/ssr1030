@@ -392,8 +392,8 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         printf("  %s" R DIM "  auto gain keeps the main radar's beam peak near -6 dBFS (peak %.1f, clip %.4f%% over %.0f s)" R EL,
                clipping ? RED "clipping seen" : (weak ? YEL "weak" : GRN "level OK"), peak_w, clip_w_pct, win);
     else if (clipping)
-        printf(RED B "  CLIPPING %.0f s ago" R RED " - lower gain: '-' VGA -2 dB, 'l' LNA -8 dB, 'p' amp off"
-               "  (warning holds %.0f s)" R EL, now - last_clip_t, win);
+        printf(RED B "  CLIPPING %.0f s ago" R RED " - lower gain: '-' VGA -2 dB, 'l' LNA -8 dB, 'p' amp off" R EL,
+               now - last_clip_t);
     else if (weak)
         printf(YEL B "  WEAK SIGNAL" R YEL " - strongest pulse in %.0f s only %.1f dB above noise; raise gain: "
                "'+' VGA +2 dB, 'L' LNA +8 dB, 'p' amp on" R EL, win, peak_w - st.noise_dbfs);
