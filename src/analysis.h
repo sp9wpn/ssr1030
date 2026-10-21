@@ -137,4 +137,11 @@ int burst_item(const struct burst *b, int s, const int *rank, char *out, size_t 
 void burst_targets(const struct burst *b, const int *rank, char *out, size_t n);   /* "1/DLH123 2/..." */
 const struct burst *analysis_graph_burst(void);   /* latest burst of the main radar, else latest */
 
+/* rows of the interrogation table: Mode S UF4/UF5 split by the reply they ask for
+   (RR >= 16: Comm-B, DF20/DF21), rare uplink formats in one "UF other" row */
+struct krow { const char *label; int k, part; };
+extern const struct krow krows[];
+extern const int nkrows;
+long krow_count(const struct krow *r, const long *by_kind, const long *commb_by_kind);
+
 #endif
