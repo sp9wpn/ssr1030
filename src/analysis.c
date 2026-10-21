@@ -405,6 +405,9 @@ static bool stage2(struct interrog *x, int burst_code)
             AS.bds[b]++;
             if (x->burst >= 0) AS.bds_inbeam[b]++;
             if (x->sidelobe) AS.bds_side[b]++;
+            AS.commb[k]++;
+            if (x->burst >= 0) AS.commb_inbeam[k]++;
+            if (x->sidelobe) AS.commb_side[k]++;
         }
         AS.pc[getbits(x->msg, 6, 8)]++;
         AS.di[getbits(x->msg, 14, 16)]++;
@@ -805,6 +808,9 @@ void analysis_print_summary(FILE *f)
     for (int k = 0; k < K_COUNT; k++) {
         if (!AS.total[k]) continue;
         fprintf(f, "%-26s %9ld %9ld %9ld\n", kind_label(k), AS.total[k], AS.inbeam[k], AS.side[k]);
+        if (AS.commb[k])
+            fprintf(f, "  %-24s %9ld %9ld %9ld\n", k == K_UF5 || k == K_UF21 ? "Comm-B req -> DF21" : "Comm-B req -> DF20",
+                    AS.commb[k], AS.commb_inbeam[k], AS.commb_side[k]);
     }
     fprintf(f, "\nTCAS/ACAS (excluded): %ld  (UF0 %ld, UF16 %ld, whisper-shout %ld; %d aircraft)\n",
             AS.tcas_total, AS.tcas_uf0, AS.tcas_uf16, AS.tcas_ws, AS.naddr_tcas);
