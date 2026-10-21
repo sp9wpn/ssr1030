@@ -113,6 +113,7 @@ struct analysis_state {
 
     long uf11_code[2][64][16];  /* [is_si][code][pr] */
     long bds[256], bds_inbeam[256], bds_side[256];
+    long commb[K_COUNT], commb_inbeam[K_COUNT], commb_side[K_COUNT];  /* Comm-B requests (DF20/21 reply) */
     long pc[8];
     long di[8];
     struct addr_entry addrs[ADDR_HASH];

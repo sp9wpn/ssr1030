@@ -17,10 +17,10 @@
 static uint64_t last_samples, last_clip, last_pulses, last_clip_prev, last_samples_prev;
 /* snapshots of the counters for per-minute rates over the last 60 s */
 #define SNAP_N 160
-static struct { double t; long total[K_COUNT]; long bds[256]; } snap[SNAP_N];
+static struct { double t; long total[K_COUNT], commb[K_COUNT]; long bds[256]; } snap[SNAP_N];
 static int nsnap;
 static double last_now = -1;
-static float rate[K_COUNT], bds_rate[256];   /* per minute */
+static float rate[K_COUNT], commb_rate[K_COUNT], bds_rate[256];   /* per minute */
 
 /* spaces needed to pad s to w visible columns (escape sequences excluded) */
 static int pad_to(const char *s, int w)
@@ -312,6 +312,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         int cur = nsnap % SNAP_N;
         snap[cur].t = now;
         memcpy(snap[cur].total, AS.total, sizeof(AS.total));
+        memcpy(snap[cur].commb, AS.commb, sizeof(AS.commb));
         memcpy(snap[cur].bds, AS.bds, sizeof(AS.bds));
         nsnap++;
         int old = cur;
@@ -324,8 +325,10 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
             old = j;
         }
         double span = now - snap[old].t;
-        for (int k = 0; k < K_COUNT; k++)
+        for (int k = 0; k < K_COUNT; k++) {
             rate[k] = span > 0 ? (float)((AS.total[k] - snap[old].total[k]) * 60.0 / span) : 0;
+            commb_rate[k] = span > 0 ? (float)((AS.commb[k] - snap[old].commb[k]) * 60.0 / span) : 0;
+        }
         for (int b = 0; b < 256; b++)
             bds_rate[b] = span > 0 ? (float)((AS.bds[b] - snap[old].bds[b]) * 60.0 / span) : 0;
     }
@@ -433,6 +436,10 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         if (!AS.total[k] || k == K_UF0 || k == K_UF16) continue;
         snprintf(left[nl++], 80, "%-24s %8ld %7ld %7ld %6.0f", kind_label(k), AS.total[k], AS.inbeam[k],
                  AS.side[k], rate[k]);
+        if (AS.commb[k] && nl < 24)          /* RR >= 16: the reply is DF20 (altitude) or DF21 (identity) */
+            snprintf(left[nl++], 80, "  %-22s %8ld %7ld %7ld %6.0f",
+                     k == K_UF5 || k == K_UF21 ? "Comm-B req -> DF21" : "Comm-B req -> DF20",
+                     AS.commb[k], AS.commb_inbeam[k], AS.commb_side[k], commb_rate[k]);
     }
     if (nl == 1) snprintf(left[nl++], 80, DIM "(no radar interrogations yet)" R);
 

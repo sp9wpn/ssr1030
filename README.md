@@ -94,7 +94,7 @@ Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coi
 ## Dashboard layout
 
 Below the status lines there are three columns:
-- **Interrogations:** per type, with total, in-beam, sidelobe and rate per minute (counted over the last 60 s).
+- **Interrogations:** per type, with total, in-beam, sidelobe and rate per minute (counted over the last 60 s). Under UF4 and UF5, a `Comm-B req -> DF20` / `-> DF21` row counts the roll-calls that request a Comm-B register (RR ≥ 16), which the aircraft answers with DF20 or DF21. These are part of the UF4/UF5 counts above them.
 - **Comm-B BDS:** per requested register, with register and shortcode (`4,0 selAlt`), total, in-beam, sidelobe and rate per minute.
 - **Radars:** one line each with bursts, rotation, dwell and interrogations per burst. UF11 codes, DI/PC and roll-called aircraft are in the exit summary.
 
