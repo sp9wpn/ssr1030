@@ -88,7 +88,8 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
        34.33 ms  sqk          RYR48SC*      -16.9 ██████████████████████
                  ↳ DF5   131.4 µs  res -0.1  squawk 6162
   ```
-- **Autofreeze (`F`):** arms a one-shot freeze. The first burst with a matched reply freezes the screen and opens it in the burst chart; `space` returns to live. The status line shows `AUTOFREEZE` while armed. Without `--rx1090`, `F` only shows a hint. Add `--beep` to ring the terminal bell when it triggers.
+- **Autofreeze (`F`):** arms a one-shot freeze. The first burst with a matched reply freezes the screen and opens it in the burst chart; `space` returns to live. The status line shows `AUTOFREEZE` while armed. Without `--rx1090`, `F` only shows a hint.
+- **Beep (`--beep`):** rings the terminal bell once for every burst with at least one matched reply, with or without autofreeze. This includes the burst that triggers autofreeze.
 - **Callsigns:** DF17 identification and Comm-B BDS 2,0 from dump1090 fill the callsign table, so `-B` is not needed (and is ignored).
 - **Debug:** `RX1090_DEBUG=1` prints each lock attempt to stderr. `RX1090_LOG=FILE` writes every reply (12 MHz time in s, DF, address, II/SI code, hex) and the clock data, for offline analysis.
 

@@ -572,7 +572,8 @@ static void usage(void)
 "      --rx-pos LAT,LON[,ALT_M]     1090 antenna position: the reply delay is then predicted from\n"
 "                         each aircraft's ADS-B position, which locks the clock from 2 replies\n"
 "                         and matches replies to within 40 us\n"
-"      --beep             ring the terminal bell when autofreeze (key F) triggers\n\n"
+"      --beep             ring the terminal bell on every burst with matched replies\n"
+"                         (once per burst; also when autofreeze, key F, triggers)\n\n"
 "ADS-B callsigns (1090 MHz, HackRF retunes for short windows):\n"
 "  -B, --adsb             listen on 1090 periodically to map addresses to callsigns\n"
 "      --adsb-every S     minimum time between windows (default 30)\n"
@@ -848,17 +849,15 @@ int main(int argc, char **argv)
                 while (seen_hist < AS.nhist) {
                     const struct burst *b = &AS.hist[seen_hist % BURST_HIST];
                     if (code != -2 && b->code == code) { agc_burst(dev, b, d); last_main_burst = now; }
-                    if (autofreeze && !frozen) {
-                        int nrep = 0;
-                        for (int k = 0; k < b->ngp; k++) nrep += b->gp[k].rep_n;
-                        if (nrep) {
-                            autofreeze = false;
-                            frozen = show_graph = force_full = true;
-                            display_graph_pin(b->id);
-                            if (opt.beep) { fputs("\a", stdout); fflush(stdout); }
-                            snprintf(cmd_msg, sizeof(cmd_msg), "autofreeze: burst #%d %s, %d matched repl%s (space: live)",
-                                     b->id, b->key, nrep, nrep == 1 ? "y" : "ies");
-                        }
+                    int nrep = 0;
+                    for (int k = 0; k < b->ngp; k++) nrep += b->gp[k].rep_n;
+                    if (nrep && opt.beep) { fputs("\a", stdout); fflush(stdout); }
+                    if (nrep && autofreeze && !frozen) {
+                        autofreeze = false;
+                        frozen = show_graph = force_full = true;
+                        display_graph_pin(b->id);
+                        snprintf(cmd_msg, sizeof(cmd_msg), "autofreeze: burst #%d %s, %d matched repl%s (space: live)",
+                                 b->id, b->key, nrep, nrep == 1 ? "y" : "ies");
                     }
                     seen_hist++;
                 }
