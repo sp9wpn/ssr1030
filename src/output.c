@@ -13,7 +13,7 @@ int output_open(const char *path, char sep)
     osep = sep;
     const char *cols[] = { "t_s", "utc", "kind", "uf", "amp_dbfs", "p1_dbfs", "p6_dbfs", "gain_db", "rx_db", "p2_rel_db", "p5_rel_db", "p4_us",
                            "s1", "sidelobe", "tcas", "burst", "radar", "addr", "callsign", "ii_si", "pr", "rr",
-                           "di", "bds", "sync", "quality", "hex" };
+                           "di", "bds", "sync", "quality", "hex", "answered", "reply_df", "reply_us", "replies", "residual_us" };
     for (size_t k = 0; k < sizeof(cols) / sizeof(cols[0]); k++)
         fprintf(out, "%s%s", k ? (char[]){ osep, 0 } : "", cols[k]);
     fputc('\n', out);
@@ -59,9 +59,16 @@ void output_write(const struct interrog *it, double start_epoch)
     fprintf(out, "%.0f%c%.1f%c", it->gain_db, s, it->amp_db - it->gain_db, s);
     if (isnan(it->p2_db)) fprintf(out, "-%c", s); else fprintf(out, "%.1f%c", it->p2_db, s);
     if (isnan(it->p5_db)) fprintf(out, "-%c", s); else fprintf(out, "%.1f%c", it->p5_db, s);
-    fprintf(out, "%.2f%c%d%c%d%c%d%c%d%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%.2f%c%.2f%c%s\n",
+    fprintf(out, "%.2f%c%d%c%d%c%d%c%d%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%.2f%c%.2f%c%s",
             it->p4_width, s, it->s1, s, it->sidelobe, s, it->tcas, s, it->burst, s, radar, s, addr, s,
             cs, s, iisi, s, pr, s, rr, s, di, s, bds, s, it->sync, s, it->quality, s, hex);
+    /* 1090 reply: "-" when it could not be checked (no --rx1090, no lock, not matchable) */
+    if (!it->checked) fprintf(out, "%c-%c-%c-%c-%c-\n", s, s, s, s, s);
+    else if (!it->answered) fprintf(out, "%c0%c-%c-%c0%c-\n", s, s, s, s, s);
+    else {
+        fprintf(out, "%c1%c%d%c%.1f%c%d%c", s, s, it->reply_df, s, it->reply_us, s, it->uf == 11 ? it->nreplies : 1, s);
+        if (isnan(it->reply_res_us)) fputs("-\n", out); else fprintf(out, "%.1f\n", it->reply_res_us);
+    }
 }
 
 void output_close(void)
@@ -81,8 +88,8 @@ void print_interrog_line(FILE *f, const struct interrog *it)
     if (kind_is_modes(it->kind) && it->kind < K_S_NOSYNC) snprintf(q, sizeof(q), "q%.2f ", it->quality);
     char rc[8];
     radar_code_str(it->radar, rc, sizeof(rc));
-    fprintf(f, "%12.6f %-24s %6.1fdBFS %-8s %-4s %s%s%s%s%s %s%s\n", it->t, kind_label(it->kind),
+    fprintf(f, "%12.6f %-24s %6.1fdBFS %-8s %-4s %s%s%s%s%s%s %s%s\n", it->t, kind_label(it->kind),
             it->amp_db, p2, rc, it->s1 ? "S1 " : "", it->sidelobe ? "SLS " : "",
             it->tcas ? "TCAS " : "", it->len_mismatch ? "LEN? " : "",
-            it->burst >= 0 ? "B" : "-", q, desc);
+            it->burst >= 0 ? "B" : "-", it->answered ? "*" : " ", q, desc);
 }

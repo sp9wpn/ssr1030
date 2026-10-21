@@ -180,6 +180,34 @@ static double half_bit(const float *m, double start, double len)
 }
 
 /* returns message length in samples when decoded, 0 otherwise */
+/* returns false when the frame is not usable; window statistics only when count */
+static bool frame(const uint8_t *msg, int nbits, bool count)
+{
+    int df = msg[0] >> 3;
+    uint32_t syn = modes_crc(msg, nbits) ^ getbits(msg, nbits - 23, nbits);
+    double now = (double)time(NULL);
+    char cs[9];
+
+    if (df == 17 || df == 18) {
+        if (syn || nbits != 112) return false;
+        if (count) { st.frames++; st.df17++; }
+        uint32_t aa = getbits(msg, 9, 32);
+        cs_slot(aa, true);
+        int tc = getbits(msg, 33, 37);
+        if (tc >= 1 && tc <= 4 && callsign(msg, 41, cs)) { cs_set(aa, cs, now); if (count) st.idents++; }
+    } else if (df == 11) {
+        if ((syn & ~0x7Fu) || nbits != 56) return false;
+        if (count) { st.frames++; st.df11++; }
+        cs_slot(getbits(msg, 9, 32), true);
+    } else if (df == 20 || df == 21) {
+        uint32_t aa = syn;
+        if (!known(aa) || nbits != 112) return false;
+        if (count) st.frames++;
+        if (getbits(msg, 33, 40) == 0x20 && callsign(msg, 41, cs)) { cs_set(aa, cs, now); if (count) st.commb_idents++; }
+    } else return false;
+    return true;
+}
+
 static int try_decode(const float *m, float thr)
 {
     uint8_t msg[14] = { 0 };
@@ -195,29 +223,13 @@ static int try_decode(const float *m, float thr)
             nbits = df >= 16 ? 112 : 56;
         }
     }
-    int df = msg[0] >> 3;
-    uint32_t syn = modes_crc(msg, nbits) ^ getbits(msg, nbits - 23, nbits);
-    double now = (double)time(NULL);
-    char cs[9];
-
-    if (df == 17 || df == 18) {
-        if (syn) return 0;
-        st.frames++; st.df17++;
-        uint32_t aa = getbits(msg, 9, 32);
-        cs_slot(aa, true);
-        int tc = getbits(msg, 33, 37);
-        if (tc >= 1 && tc <= 4 && callsign(msg, 41, cs)) { cs_set(aa, cs, now); st.idents++; }
-    } else if (df == 11) {
-        if (syn & ~0x7Fu) return 0;
-        st.frames++; st.df11++;
-        cs_slot(getbits(msg, 9, 32), true);
-    } else {                                          /* DF20/21 */
-        uint32_t aa = syn;
-        if (!known(aa)) return 0;
-        st.frames++;
-        if (getbits(msg, 33, 40) == 0x20 && callsign(msg, 41, cs)) { cs_set(aa, cs, now); st.commb_idents++; }
-    }
+    if (!frame(msg, nbits, true)) return 0;
     return (int)lround((8 + nbits) * spus);
+}
+
+void adsb_frame(const uint8_t *msg, int nbits)
+{
+    frame(msg, nbits, false);
 }
 
 void adsb_process(const int8_t *iq, size_t ns)

@@ -54,6 +54,33 @@ These apply to statistics, bursts, the log and `--list`. TCAS stays a separate s
 Burst detection still uses all interrogations, because the beam is physical.
 Per-burst counts, sequences, dwell and rotation are computed only from interrogations that pass the filters.
 
+## 1090 MHz replies (`--rx1090`)
+
+A second receiver on 1090 MHz shows which interrogations were answered. Run [dump1090-fa](https://github.com/flightaware/dump1090) on an RTL-SDR, then point ssr1030 at its Beast output:
+
+```
+dump1090 --device-type rtlsdr --net --net-ro-interval 0.05 --quiet
+./ssr1030 --rx1090 localhost:30005
+```
+
+Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acquisition or DF17) it has not heard in the last minute. ssr1030 therefore sends every roll-called address to dump1090's Beast input (port 30004, same host) as a DF11 acquisition squitter every 20 s. dump1090 then accepts that aircraft's replies. These announced aircraft also appear in dump1090's own aircraft list.
+
+- **Marking:** an answered query gets `*`:
+  - in the recent list and `-L` output, after the `B` flag;
+  - in burst sequences, for example `alt/1*`;
+  - in the burst chart, after the target.
+- **Matching:**
+  - roll-calls (UF4/5/20/21) by aircraft address, with a DF4/20 reply to UF4/20 and a DF5/21 reply to UF5/21;
+  - UF11 by the II/SI code in the DF11 reply. II/SI codes are reused by distant radars (seen on air: SI17 DF11 replies to a radar with a ~5.0 s rotation), so with the geometry lock a DF11 reply must also arrive within 40 µs of its predicted time.
+  - Mode A/C replies carry no address or radar code, so A/C queries are never marked.
+- **Clock:** the two receivers have independent clocks. ssr1030 finds the offset from roll-calls and replies with the same address, then tracks the drift. Until it is locked, nothing is marked, and queries are held 7 s so the scans that produce the lock (two, one rotation apart) can still be marked; the dashboard lags by that much while searching. The dashboard line `1090 replies` shows the state.
+  - A reply follows its query by 128 µs (transponder turnaround) plus the extra path radar → aircraft → receiver.
+  - Locking needs a few heard replies from roll-called aircraft within 60 s. With the 1090 antenna placed so that it hears few of the radar's targets, this can take a while.
+- **No `*` does not mean no reply.** The second receiver hears only some replies (antenna placement, range), so an unmarked query may have been answered.
+- **Delay:** queries pass to the analysis only after their replies could have arrived, so the dashboard runs about 0.1–0.6 s behind. `--net-ro-interval 0.05` keeps dump1090's part of that small (its default is 0.5 s).
+- **Callsigns:** DF17 identification and Comm-B BDS 2,0 from dump1090 fill the callsign table, so `-B` is not needed (and is ignored).
+- **Debug:** `RX1090_DEBUG=1` prints each lock attempt to stderr. `RX1090_LOG=FILE` writes every reply (12 MHz time in s, DF, address, II/SI code, hex) and the clock data, for offline analysis.
+
 ## ADS-B callsigns
 
 `-B, --adsb` retunes the HackRF to 1090 MHz for `--adsb-dwell` seconds (default 2.9) at most every `--adsb-every` seconds (default 30).
@@ -133,6 +160,15 @@ Close to the radar (a few km), start with `-l 16 -g 20`.
 | A/C-only all-call (A or C) | P4 0.8 µs, 2 µs after P3 |
 | A/C/S all-call (A or C) | P4 1.6 µs |
 | Mode S | P2 at 2 µs, P6 at 3.5 µs, then DPSK decode of UF0/4/5/11/16/19/20/21/24 |
+
+### Sidelobe Mode S (`--modes-threshold`)
+
+Mode S is also decoded from pulses down to `--modes-threshold` dB above noise (default 7), below the normal pulse threshold (`--threshold`, default 12). This picks up roll-calls heard through the radar's sidelobes, aimed at aircraft in other directions.
+- **Two segmenters:** a second segmenter runs at the lower threshold beside the main one. Mode A/C, intermode, S1 and the pulse-density guard use only pulses from the main one, so their results do not change. Two weak noise pulses 8 or 21 µs apart would be too common.
+- **Mode S** takes a pulse from either segmenter. Near the main threshold, the main segmenter cuts weak pulses short or breaks P6 into pieces; the low one keeps them whole. In the sidelobe the sync reversal is masked by P5, so the bit timing comes from the data chips.
+- **Checks:** a UF11 must decode to address `ffffff`. Any other result is a corrupted decode and is counted as `S-grb`. Roll-calls carry no such check, so a bit error gives a one-off wrong address.
+- **Effect (12 s recording, 7 dB):** UF11 32 instead of 14, all with correct parity; roll-calls 50 instead of 16, 30 of them through sidelobes. Mode A/C unchanged, except 8 "A/C" that were pieces of weak Mode S.
+- `--modes-threshold 12` (equal to `--threshold`) turns it off.
 
 Each interrogation also carries these flags:
 - **SLS:** P2 ≥ P1 (A/C), or P5 ≥ P6 (Mode S). Both mean a sidelobe.
@@ -231,7 +267,7 @@ The interleaving statistics use the same tokens, without the target numbers.
 
 ## Log columns
 
-`t_s utc kind uf amp_dbfs p1_dbfs p6_dbfs gain_db rx_db p2_rel_db p5_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds sync quality hex`
+`t_s utc kind uf amp_dbfs p1_dbfs p6_dbfs gain_db rx_db p2_rel_db p5_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds sync quality hex answered reply_df reply_us replies`
 
 - `amp_dbfs` is the query amplitude: P6 for Mode S, P1 for A/C.
   - P6 is the 70th percentile of the plateau, excluding the P5 window. It is 16–30 µs long, so much less noisy than the 0.8 µs P1.
@@ -241,6 +277,10 @@ The interleaving statistics use the same tokens, without the target numbers.
 - `radar` is the attributed radar code, or `-` when unknown.
 - `quality` is the weakest DPSK bit confidence (0–1).
 - `hex` is the raw Mode S message.
+- `answered reply_df reply_us replies` come from `--rx1090`:
+  - `answered` is 1 when a reply was heard and 0 when none was heard. It is `-` when the query could not be checked: no `--rx1090`, clock not locked yet, or a query type that is not matched.
+  - `reply_us` is the reply delay after the query in µs: 128 µs turnaround plus the extra path. It carries a small constant error from the clock lock.
+  - `replies` is the number of DF11 replies for UF11, and 1 for a roll-call.
 
 ## License
 

@@ -213,7 +213,7 @@ static void draw_graph(int cols, int rows)
 
     /* bar width: screen minus the row prefix, 5 columns spare */
     char probe[96];
-    int plen = snprintf(probe, sizeof(probe), "%+10.2f ms  %-12.12s %-8.8s %-3s %6.1f ", -9999.99, "", "", "", -99.9);
+    int plen = snprintf(probe, sizeof(probe), "%+10.2f ms  %-12.12s %-8.8s%s %-3s %6.1f ", -9999.99, "", "", " ", "", -99.9);
     int W = cols - plen - 5;
     if (W < 10) W = 10;
     for (int i = g_scroll; i < last; i++) {
@@ -236,9 +236,9 @@ static void draw_graph(int cols, int rows)
             if (mpos > W) mpos = W;
         }
         /* fixed-width fields: query 12 (longest token, e.g. S-msg/hdgSpd), target 8 (callsign or hex),
-         * "sls" when the query reached us through a sidelobe */
-        printf("%s%+10.2f ms  %-12.12s %-8.8s %-3s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), ts, tg,
-               g->cls == GP_SIDE ? "sls" : "", g->amp);
+         * "*" when it was answered on 1090, "sls" when the query reached us through a sidelobe */
+        printf("%s%+10.2f ms  %-12.12s %-8.8s%s %-3s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), ts, tg,
+               g->ans ? "*" : " ", g->cls == GP_SIDE ? "sls" : "", g->amp);
         fputs(R, stdout);
         int end = mpos > len ? mpos : len;
         for (int k = 0; k < end; k++) {
@@ -416,6 +416,25 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
                    (ri->adsb_next < 0 ? "waiting for gap after burst" : "idle"),
                    cs_count(), as.windows, as.frames, as.idents + as.commb_idents);
             if (!ri->adsb_now && ri->adsb_next >= 0) printf(", next in %.0f s", ri->adsb_next);
+        }
+        fputs(EL, stdout);
+    }
+    if (ri->rx1090) {
+        struct rx1090_stats x;
+        rx1090_get_stats(&x);
+        printf("1090 replies: dump1090 %s ", x.peer);
+        if (!x.connected) printf(RED "not connected" R " (start: dump1090 --device-type rtlsdr --net)");
+        else {
+            printf(GRN "connected" R " %.0f frames/s%s  ", x.rate, x.feeding ? "" : RED " (addresses not fed to port 30004)" R);
+            if (!x.locked) printf(YEL "clock: searching" R DIM " (needs roll-calls answered by known aircraft)" R);
+            else {
+                printf(GRN "clock locked" R " (%s) drift %+.1f ppm", x.geo ? "positions" : "delay histogram", x.drift_ppm);
+                if (x.geo && x.nres) printf("  residual rms %.1f us", x.res_rms_us);
+                printf("   answered* roll-call %ld/%ld", x.rc_ans, x.rc);
+                if (x.rc) printf(" (%.0f%%)", 100.0 * x.rc_ans / x.rc);
+                printf("  UF11 %ld/%ld", x.ac_ans, x.ac);
+                if (x.ac) printf(" (%.0f%%)", 100.0 * x.ac_ans / x.ac);
+            }
         }
         fputs(EL, stdout);
     }

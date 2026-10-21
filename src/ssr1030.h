@@ -28,8 +28,9 @@ struct pulse {
     double lead;        /* leading edge (half amplitude), global sample index */
     double width;       /* microseconds */
     float amp;          /* linear magnitude (full scale ~ 127) */
-    int density;        /* pulses in the preceding 1 ms */
+    int density;        /* strong pulses in the preceding 1 ms */
     bool used;
+    bool strong;        /* from the main threshold (else only usable for Mode S) */
 };
 
 struct interrog {
@@ -56,13 +57,20 @@ struct interrog {
     float sync;         /* sync reversal correlation, -1 = perfect */
     float quality;      /* weakest bit confidence, 0..1 */
     bool len_mismatch;  /* P6 width disagrees with UF */
+    /* 1090 MHz reply (--rx1090) */
+    bool checked;       /* a reply could be matched: clock locked, roll-call or UF11 */
+    bool answered;      /* a reply was matched: roll-call by address, UF11 by II/SI */
+    uint8_t reply_df;   /* DF of the (first) reply, 0 none */
+    uint8_t nreplies;   /* UF11: DF11 replies matched */
+    float reply_us;     /* reply delay after the query, us (128 us turnaround + extra path) */
+    float reply_res_us; /* measured - predicted from the aircraft's position (geometry lock), NAN unknown */
 };
 
 /* ---- demod.c ---- */
 typedef void (*interrog_cb)(struct interrog *it, void *ctx);
 
 struct demod;
-struct demod *demod_new(double fs, float thr_db, float thr_abs, int dens_max, interrog_cb cb, void *ctx);
+struct demod *demod_new(double fs, float thr_db, float thr_abs, float modes_db, int dens_max, interrog_cb cb, void *ctx);
 void demod_process(struct demod *d, const int8_t *iq, size_t nsamples);
 void demod_flush(struct demod *d);
 void demod_skip(struct demod *d, size_t nsamples);   /* advance time without data (retune gaps) */
@@ -122,6 +130,7 @@ struct analysis_cfg {
 void analysis_init(const struct analysis_cfg *cfg);
 void analysis_set_floor(double thr_dbfs);
 void analysis_set_sink(void (*sink)(const struct interrog *it));
+void analysis_set_rx(bool (*ready)(double t), void (*match)(struct interrog *x));   /* --rx1090 */
 void analysis_add(struct interrog *it);
 void analysis_tick(double now);
 void analysis_print_summary(FILE *f);
@@ -152,6 +161,40 @@ unsigned cs_version(void);
 int cs_load(const char *path);
 int cs_save(const char *path);
 int cs_fetch_adsblol(double lat, double lon, int radius_nm);   /* startup bootstrap, -1 on error */
+void adsb_frame(const uint8_t *msg, int nbits);   /* decoded 1090 frame from elsewhere (--rx1090) */
+
+/* ---- geo.c ---- */
+bool df17_position(const uint8_t *msg, double ref_lat, double ref_lon, double *lat, double *lon, double *alt_m);
+void geo_ecef(double lat, double lon, double alt_m, double xyz[3]);
+double geo_dist(const double a[3], const double b[3]);
+int geo_parse(const char *s, double *lat, double *lon, double *alt_m);   /* "LAT,LON[,ALT_M]", -1 on error */
+
+/* ---- rx1090.c ---- */
+struct rx1090_stats {
+    bool connected, locked;
+    bool feeding;           /* roll-called addresses are announced to dump1090 */
+    bool geo;               /* locked from aircraft positions */
+    double res_rms_us;      /* rms of measured - predicted delay, last 64 matches */
+    long nres;
+    long npos;              /* aircraft with an ADS-B position */
+    long frames;            /* Mode S frames received */
+    double rate;            /* frames/s over the last few seconds */
+    double off_ms, drift_ppm;
+    long locks;             /* times the clock lock was found */
+    long rc, rc_ans;        /* roll-calls checked / answered (since lock) */
+    long ac, ac_ans;        /* UF11 all-calls checked / answered */
+    char peer[128];
+};
+int rx1090_start(const char *hostport);              /* starts the reader thread, -1 on bad address */
+void rx1090_stop(void);
+void rx1090_hclock(double t, double wall);           /* HackRF stream time t arrived at host time wall */
+void rx1090_clock_reset(void);                       /* HackRF samples were lost: lock again */
+void rx1090_note_query(const struct interrog *it);   /* every demodulated interrogation, in time order */
+void rx1090_poll(double t_now);                      /* main loop: take new replies, try to lock */
+bool rx1090_ready(double t);                         /* replies for a query at t are in */
+void rx1090_match(struct interrog *x);               /* set answered/reply fields, queries in time order */
+void rx1090_get_stats(struct rx1090_stats *s);
+void rx1090_set_geometry(double rlat, double rlon, double ralt, double xlat, double xlon, double xalt);
 
 /* ---- display.c ---- */
 struct run_info {
@@ -164,6 +207,7 @@ struct run_info {
     bool live;
     bool adsb;             /* ADS-B windows enabled */
     bool adsb_now;         /* currently listening on 1090 */
+    bool rx1090;           /* replies from dump1090 (--rx1090) */
     double adsb_next;      /* seconds until the next window (approx.), <0 waiting for burst */
     char filters[256];
     bool agc;              /* automatic gain */

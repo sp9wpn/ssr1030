@@ -4,6 +4,18 @@
  * (with short-gap merging so DPSK phase-reversal dips do not split P6) ->
  * half-amplitude edge refinement -> pulse queue -> pattern matcher.
  *
+ * Two segmenters: the main one (threshold --threshold) gives the "strong"
+ * pulses; a second one with the lower Mode S threshold adds pulses that never
+ * reach the main threshold, so interrogations heard through the radar's
+ * sidelobes are decoded too (DPSK with 56+ bits and parity is hard to fake
+ * from noise). Mode A/C, intermode, S1 and the pulse density use only strong
+ * pulses: a P1-P3 pair of weak noise pulses would be too common. Pulses above
+ * both thresholds appear twice (one copy per segmenter); Mode S takes either
+ * and then marks both used. Near the main threshold the main segmenter cuts
+ * a pulse short or breaks P6 into fragments, the weak copy is whole. The weak
+ * segmenter also ends a segment below SEG_REL of its peak, so the edges of
+ * strong pulses do not bridge into one weak segment.
+ *
  * Interrogation timing (ICAO Annex 10 Vol IV, from P1 leading edge):
  *   Mode A/C           P3 at 8/21 us, P2 (SLS) at 2 us
  *   intermode          P4 2 us after P3: 0.8 us = A/C-only, 1.6 us = A/C/S all-call
@@ -22,6 +34,7 @@
 #define QN          4096
 #define QMASK       (QN - 1)
 #define MAX_PULSE_US 40.0
+#define SEG_REL     0.3f
 
 struct demod {
     double fs, spus;            /* samples per second / per microsecond */
@@ -32,16 +45,18 @@ struct demod {
     float complex dc;
     float noise;                /* mean noise magnitude */
     float thr_db, thr_abs, thr;
+    float modes_db, thr_lo;     /* Mode S pulse threshold (<= thr) */
     float thr_sls;              /* P2/P5 presence at their known positions: noise + 6 dB */
     double nacc; uint64_t ncnt;
 
-    int in_pulse;
-    uint64_t ps, plast;
+    struct seg { int on; uint64_t ps, plast; float peak; } hi, lo;   /* main / Mode S segmenter */
+    double sleads[QN];          /* leads of recent strong pulses, for the density */
+    uint64_t ns;
     int merge_gap, min_len, max_len;
 
     struct pulse q[QN];
     uint64_t qhead, qtail;      /* qhead: next write; qtail: oldest unexamined */
-    uint64_t qdens;             /* oldest pulse inside the 1 ms density window */
+    uint64_t qdens;             /* oldest strong pulse inside the 1 ms density window */
     int dens_max;
     uint64_t garbled;
 
@@ -54,10 +69,11 @@ struct demod {
     float *tmp;
 };
 
-struct demod *demod_new(double fs, float thr_db, float thr_abs, int dens_max, interrog_cb cb, void *ctx)
+struct demod *demod_new(double fs, float thr_db, float thr_abs, float modes_db, int dens_max, interrog_cb cb, void *ctx)
 {
     struct demod *d = calloc(1, sizeof(*d));
     d->fs = fs;
+    d->modes_db = modes_db > 0 && modes_db < thr_db ? modes_db : thr_db;
     d->spus = fs / 1e6;
     d->z = calloc(RING, sizeof(float complex));
     d->m = calloc(RING, sizeof(float));
@@ -271,7 +287,10 @@ static void decode_modes(struct demod *d, struct interrog *it, double p6lead, do
     case 0:  it->kind = K_UF0;  it->tcas = true; break;
     case 4:  it->kind = K_UF4;  break;
     case 5:  it->kind = K_UF5;  break;
-    case 11: it->kind = K_UF11; break;
+    case 11:
+        /* all-calls carry address FFFFFF in AP: anything else is a corrupted decode */
+        it->kind = it->addr == 0xFFFFFF ? K_UF11 : K_S_GARBLE;
+        break;
     case 16: it->kind = K_UF16; it->tcas = true; break;
     case 19: it->kind = K_UF19; break;
     case 20: it->kind = K_UF20; break;
@@ -300,8 +319,9 @@ static inline double rel_us(struct demod *d, const struct pulse *a, const struct
 
 static bool is_short(const struct pulse *p) { return p->width > 0.6 && p->width < 1.05; }
 
-/* find unused pulse after index i at offset off +- tol us */
-static int find_at(struct demod *d, uint64_t i, double off, double tol, bool need_short)
+/* find unused pulse after index i at offset off +- tol us; strong pulses only
+ * for Mode A/C (weak ones are Mode S candidates) */
+static int find_at(struct demod *d, uint64_t i, double off, double tol, bool need_short, bool need_strong)
 {
     struct pulse *p1 = &d->q[i & QMASK];
     for (uint64_t j = i + 1; j < d->qhead; j++) {
@@ -310,6 +330,7 @@ static int find_at(struct demod *d, uint64_t i, double off, double tol, bool nee
         if (r > off + tol) break;
         if (p->used || r < off - tol) continue;
         if (need_short && !is_short(p)) continue;
+        if (need_strong && !p->strong) continue;
         return (int)(j - i);
     }
     return -1;
@@ -329,7 +350,7 @@ static void match(struct demod *d, uint64_t i)
 {
     struct pulse *p1 = &d->q[i & QMASK];
     if (p1->used) return;
-    if (!is_short(p1)) { d->stray++; return; }
+    if (!is_short(p1)) { if (p1->strong) d->stray++; return; }
 
     struct interrog it;
     memset(&it, 0, sizeof(it));
@@ -338,9 +359,10 @@ static void match(struct demod *d, uint64_t i)
     it.p6_db = NAN;
 
     /* --- Mode S: P1, P2 @2.0, P6 @3.5 --- */
-    int j2 = find_at(d, i, 2.0, 0.2, true);
+    int j2 = find_at(d, i, 2.0, 0.2, true, false);
     if (j2 > 0) {
-        int j6 = find_at(d, i, 3.5, 0.25, false);
+        int j6 = find_at(d, i, 3.5, 0.25, false, true);    /* the main segmenter's P6 when there is one */
+        if (j6 < 0) j6 = find_at(d, i, 3.5, 0.25, false, false);
         if (j6 > 0) {
             struct pulse *p6 = &d->q[(i + j6) & QMASK];
             /* chain fragments of a broken-up P6 */
@@ -349,6 +371,7 @@ static void match(struct demod *d, uint64_t i)
             for (uint64_t k = i + j6 + 1; k < d->qhead; k++) {
                 struct pulse *p = &d->q[k & QMASK];
                 if (p->lead - end > 0.5 * d->spus) break;
+                if (p6->strong && !p->strong && p->lead > end) continue;   /* echo or ringing after a strong P6 */
                 double e = p->lead + p->width * d->spus;
                 if (e > end) end = e;
                 last = k;
@@ -360,6 +383,11 @@ static void match(struct demod *d, uint64_t i)
                 decode_modes(d, &it, p6->lead, w6);
                 p1->used = p2->used = true;
                 for (uint64_t k = i + j6; k <= last; k++) d->q[k & QMASK].used = true;
+                /* the other segmenter's copies of P1 and P2 */
+                for (uint64_t k = i > d->qtail + 8 ? i - 8 : d->qtail; k < i + j6; k++) {
+                    struct pulse *p = &d->q[k & QMASK];
+                    if (fabs(p->lead - p1->lead) < 0.3 * d->spus || fabs(p->lead - p2->lead) < 0.3 * d->spus) p->used = true;
+                }
                 emit(d, &it, p1);
                 return;
             }
@@ -367,17 +395,21 @@ static void match(struct demod *d, uint64_t i)
     }
 
     /* --- Mode A/C with optional P2, P4, S1. Modes 1/2/B/D are not detected:
-     * on air they were almost all coincidences of unrelated pulses. --- */
+     * on air they were almost all coincidences of unrelated pulses. Strong
+     * pulses only (see the top of the file). --- */
+    if (!p1->strong) return;
     static const double off3[] = { 8, 21 };
     static const int base[] = { K_MODEA, K_MODEC };
     for (int m = 0; m < 2; m++) {
-        int j3 = find_at(d, i, off3[m], 0.15, true);
+        int j3 = find_at(d, i, off3[m], 0.15, true, true);
         if (j3 < 0) continue;
         struct pulse *p3 = &d->q[(i + j3) & QMASK];
         if (fabsf(20.0f * log10f(p3->amp / p1->amp)) > 3.0f) continue;
         if (p1->density > d->dens_max) { d->garbled++; return; }
         it.kind = base[m];
-        if (j2 > 0 && j2 < j3) {
+        int j2s = find_at(d, i, 2.0, 0.2, true, true);
+        if (j2s > 0 && j2s < j3) j2 = j2s;
+        if (j2 > 0 && j2 < j3 && d->q[(i + j2) & QMASK].strong) {
             struct pulse *p2 = &d->q[(i + j2) & QMASK];
             it.p2_db = 20.0f * log10f(p2->amp / p1->amp);
             if (it.p2_db >= 0) it.sidelobe = true;
@@ -388,7 +420,7 @@ static void match(struct demod *d, uint64_t i)
             float a2 = slot_level(d, p1->lead + 2.15 * d->spus, p1->lead + 2.65 * d->spus);
             if (a2 >= d->thr_sls) it.p2_db = 20.0f * log10f(a2 / p1->amp);
         }
-        int j4 = find_at(d, i, off3[m] + 2.0, 0.15, false);
+        int j4 = find_at(d, i, off3[m] + 2.0, 0.15, false, true);
         if (j4 > 0) {
             struct pulse *p4 = &d->q[(i + j4) & QMASK];
             if (p4->width > 0.5 && p4->width < 2.3 &&
@@ -405,7 +437,7 @@ static void match(struct demod *d, uint64_t i)
             struct pulse *p = &d->q[(k - 1) & QMASK];
             double r = rel_us(d, p, p1);
             if (r > 2.2) break;
-            if (r > 1.8 && is_short(p)) { it.s1 = true; break; }
+            if (r > 1.8 && is_short(p) && p->strong) { it.s1 = true; break; }
         }
         if (it.s1) it.tcas = true;
         p1->used = p3->used = true;
@@ -428,9 +460,9 @@ static void assemble(struct demod *d, bool all)
 
 /* ---------------- pulse finalisation ---------------- */
 
-static void finish_pulse(struct demod *d)
+static void finish_pulse(struct demod *d, const struct seg *g, bool strong)
 {
-    uint64_t s = d->ps, e = d->plast;
+    uint64_t s = g->ps, e = g->plast;
     int len = (int)(e - s + 1);
     if (len < d->min_len || len > d->max_len) return;
 
@@ -440,7 +472,7 @@ static void finish_pulse(struct demod *d)
     qsort(d->tmp, n, sizeof(float), cmpf);
     float amp = d->tmp[n / 2];
     if (len > 24) amp = d->tmp[(n * 3) / 4]; /* long DPSK pulse: skip reversal dips */
-    if (amp < 0.8f * d->thr) return;   /* merged noise blips, not a pulse */
+    if (amp < 0.8f * (strong ? d->thr : d->thr_lo)) return;   /* merged noise blips, not a pulse */
     float hl = amp * 0.5f;
 
     /* leading edge at half amplitude */
@@ -464,21 +496,40 @@ static void finish_pulse(struct demod *d)
     m0 = M(d, j); m1 = M(d, j + 1);
     double trail = (double)j + (m0 > m1 ? (m0 - hl) / (m0 - m1) : 0.0);
 
-    struct pulse *p = &d->q[d->qhead & QMASK];
-    p->lead = lead;
-    p->width = (trail - lead) / d->spus;
-    p->amp = amp;
-    p->used = false;
-    while (d->qdens < d->qhead && lead - d->q[d->qdens & QMASK].lead > 1000.0 * d->spus) d->qdens++;
-    if (d->qdens + QN <= d->qhead) d->qdens = d->qhead - QN + 1;
-    p->density = (int)(d->qhead - d->qdens);
+    struct pulse np = { .lead = lead, .width = (trail - lead) / d->spus, .amp = amp, .strong = strong };
+    if (strong) {
+        /* strong pulses in the preceding 1 ms */
+        while (d->qdens < d->ns && lead - d->sleads[d->qdens % QN] > 1000.0 * d->spus) d->qdens++;
+        if (d->qdens + QN <= d->ns) d->qdens = d->ns - QN + 1;
+        np.density = (int)(d->ns - d->qdens);
+        d->sleads[d->ns++ % QN] = lead;
+    }
+    /* the two segmenters finish pulses slightly out of order: keep the queue sorted */
+    uint64_t k = d->qhead;
+    while (k > d->qtail && d->q[(k - 1) & QMASK].lead > lead) { d->q[k & QMASK] = d->q[(k - 1) & QMASK]; k--; }
+    d->q[k & QMASK] = np;
 #ifdef DEBUG_PULSES
-    fprintf(stderr, "P %.3f w=%.2f a=%.1f len=%d\n", lead / d->spus, p->width, amp, len);
+    fprintf(stderr, "P %.3f w=%.2f a=%.1f len=%d %s\n", lead / d->spus, np.width, amp, len, strong ? "S" : "w");
 #endif
     d->qhead++;
-    d->pulses++;
+    if (strong) d->pulses++;
     if (d->qhead - d->qtail >= QN - 64) assemble(d, true); /* overflow guard */
     assemble(d, false);
+}
+
+/* one sample into a segmenter; rel > 0 also ends the segment below rel x its peak */
+static inline void segment(struct demod *d, struct seg *g, float a, uint64_t idx, float thr, float rel, bool strong)
+{
+    if (a >= thr && (!g->on || a >= rel * g->peak)) {
+        if (!g->on) { g->on = 1; g->ps = idx; g->peak = a; }
+        if (a > g->peak) g->peak = a;
+        g->plast = idx;
+    } else if (g->on && idx - g->plast > (uint64_t)d->merge_gap) {
+        g->on = 0;
+        finish_pulse(d, g, strong);
+    } else if (g->on && idx - g->ps > (uint64_t)d->max_len) {
+        g->on = 0;     /* CW / interference: drop */
+    }
 }
 
 void demod_process(struct demod *d, const int8_t *iq, size_t ns)
@@ -498,6 +549,7 @@ void demod_process(struct demod *d, const int8_t *iq, size_t ns)
         d->noise = (float)(acc / ns);
     }
     d->thr = d->thr_abs > 0 ? d->thr_abs : d->noise * powf(10.0f, d->thr_db / 20.0f);
+    d->thr_lo = d->thr * powf(10.0f, (d->modes_db - d->thr_db) / 20.0f);
     d->thr_sls = d->noise * 2.0f;
     float noise_cut = d->noise * 2.5f;
 
@@ -513,15 +565,8 @@ void demod_process(struct demod *d, const int8_t *iq, size_t ns)
         if (a > d->peak) d->peak = a;
         if (a < noise_cut) { d->nacc += a; d->ncnt++; }
 
-        if (a >= d->thr) {
-            if (!d->in_pulse) { d->in_pulse = 1; d->ps = idx; }
-            d->plast = idx;
-        } else if (d->in_pulse && idx - d->plast > (uint64_t)d->merge_gap) {
-            d->in_pulse = 0;
-            finish_pulse(d);
-        } else if (d->in_pulse && idx - d->ps > (uint64_t)d->max_len) {
-            d->in_pulse = 0;     /* CW / interference: drop */
-        }
+        segment(d, &d->hi, a, idx, d->thr, 0, true);
+        if (d->thr_lo < d->thr) segment(d, &d->lo, a, idx, d->thr_lo, SEG_REL, false);
     }
     if (d->ncnt > 1000) {
         /* mean of a Rayleigh distribution truncated at 2.5x mean is ~0.93 x mean */
@@ -534,7 +579,8 @@ void demod_process(struct demod *d, const int8_t *iq, size_t ns)
 
 void demod_flush(struct demod *d)
 {
-    if (d->in_pulse) { d->in_pulse = 0; finish_pulse(d); }
+    if (d->hi.on) { d->hi.on = 0; finish_pulse(d, &d->hi, true); }
+    if (d->lo.on) { d->lo.on = 0; if (d->lo.peak < d->thr) finish_pulse(d, &d->lo, false); }
     assemble(d, true);
 }
 

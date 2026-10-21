@@ -38,6 +38,14 @@ static float bins[NBINS];
 static long cur_bin = -1;
 static int nbins_filled, bins_since_bg;
 static int next_burst_id;
+static bool (*rx_ready)(double t);
+static void (*rx_match)(struct interrog *x);
+
+void analysis_set_rx(bool (*ready)(double t), void (*match)(struct interrog *x))
+{
+    rx_ready = ready;
+    rx_match = match;
+}
 static void (*sinkf)(const struct interrog *it);
 static double last11_t = -1;
 static int last11_code = -1;
@@ -438,7 +446,7 @@ static int rec_add(struct burst *b, const struct interrog *x)
             else k = NO_TARGET;
         }
     }
-    if (b->nks < SEQ_MAX) { b->ks[b->nks] = tok; b->ka[b->nks] = (uint8_t)k; b->nks++; }
+    if (b->nks < SEQ_MAX) { b->ks[b->nks] = tok; b->ka[b->nks] = (uint8_t)k; b->kans[b->nks] = x->answered; b->nks++; }
     return k;
 }
 
@@ -456,7 +464,7 @@ static bool graph_extra_ok(const struct interrog *y)
 }
 
 static void graph_put(struct burst *b, double t, float amp, float p2, float p5, uint32_t addr, uint16_t tok,
-                      int ka, int cls)
+                      int ka, int cls, bool ans)
 {
     if (b->ngp >= SEQ_MAX) return;
     struct gpoint *g = &b->gp[b->ngp++];
@@ -468,6 +476,7 @@ static void graph_put(struct burst *b, double t, float amp, float p2, float p5, 
     g->tok = tok;
     g->ka = (uint8_t)ka;
     g->cls = (uint8_t)cls;
+    g->ans = ans;
     if (cls == GP_SIDE) b->nside++;
     if (cls == GP_WEAK) b->nweak++;
 }
@@ -486,7 +495,7 @@ static uint32_t gaddr(const struct interrog *y) { return directed(y->kind) ? y->
 
 static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka)
 {
-    graph_put(b, y->t, y->amp_db, abs_p2(y), abs_p5(y), gaddr(y), seq_token(y), ka, cls);
+    graph_put(b, y->t, y->amp_db, abs_p2(y), abs_p5(y), gaddr(y), seq_token(y), ka, cls, y->answered);
 }
 
 /* Non-beam queries for the graph. Sidelobes are kept from 60 % of a rotation
@@ -495,7 +504,7 @@ static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka
  * queries that arrive after a burst was committed. */
 #define GRING 16384
 #define NPOST 8
-static struct { double t; float amp, p2, p5; uint32_t addr; uint16_t tok; uint8_t cls; } gring[GRING];
+static struct { double t; float amp, p2, p5; uint32_t addr; uint16_t tok; uint8_t cls; bool ans; } gring[GRING];
 static uint64_t gring_n;
 static struct { int idx; double until_side, until_weak; } posts[NPOST];
 static int nposts;
@@ -509,11 +518,11 @@ static void graph_note(const struct interrog *y)
         double until = cls == GP_SIDE ? posts[p].until_side : posts[p].until_weak;
         if (y->t <= until && AS.nhist - posts[p].idx <= BURST_HIST)
             graph_put(&AS.hist[posts[p].idx % BURST_HIST], y->t, y->amp_db, abs_p2(y), abs_p5(y), gaddr(y), tok,
-                      NO_TARGET, cls);
+                      NO_TARGET, cls, y->answered);
     }
     int i = gring_n++ % GRING;
     gring[i].t = y->t; gring[i].amp = y->amp_db; gring[i].tok = tok; gring[i].cls = (uint8_t)cls;
-    gring[i].p2 = abs_p2(y); gring[i].p5 = abs_p5(y); gring[i].addr = gaddr(y);
+    gring[i].p2 = abs_p2(y); gring[i].p5 = abs_p5(y); gring[i].addr = gaddr(y); gring[i].ans = y->answered;
 }
 
 static int cmp_gp(const void *x, const void *y)
@@ -543,7 +552,7 @@ static void graph_context(struct burst *b, double t0, double t1, double margin, 
         double hi = gring[i].cls == GP_SIDE ? t1 + half : t1 + margin;
         if (gring[i].t < lo || gring[i].t > hi) continue;
         graph_put(b, gring[i].t, gring[i].amp, gring[i].p2, gring[i].p5, gring[i].addr, gring[i].tok, NO_TARGET,
-                  gring[i].cls);
+                  gring[i].cls, gring[i].ans);
     }
     qsort(b->gp, b->ngp, sizeof(b->gp[0]), cmp_gp);
 }
@@ -621,10 +630,11 @@ void burst_ranks(const struct burst *b, int *rank)
 int burst_item(const struct burst *b, int s, const int *rank, char *out, size_t n)
 {
     int e = s;
-    while (e < b->nks && b->ks[e] == b->ks[s] && b->ka[e] == b->ka[s]) e++;
+    while (e < b->nks && b->ks[e] == b->ks[s] && b->ka[e] == b->ka[s] && b->kans[e] == b->kans[s]) e++;
     char ts[24], tg[8] = "";
     seq_token_str(b->ks[s], ts, sizeof(ts));
     if (b->ka[s] != NO_TARGET) snprintf(tg, sizeof(tg), "/%d", rank[b->ka[s]]);
+    if (b->kans[s]) strcat(tg, "*");                /* answered on 1090 */
     if (e - s > 1) snprintf(out, n, "%s%s#%d ", ts, tg, e - s);
     else snprintf(out, n, "%s%s ", ts, tg);
     return e;
@@ -721,6 +731,7 @@ static bool chain_reaches_core(uint64_t i)
 static void stage1(struct interrog *x, uint64_t idx)
 {
     struct open_burst *o = &AS.ob;
+    if (rx_match) rx_match(x);
     if (!x->tcas) {
         if (o->open && x->t - o->t1 > AS.cfg.burst_gap) close_burst();
         if (is_member(x)) {
@@ -746,11 +757,16 @@ static void stage1(struct interrog *x, uint64_t idx)
 void analysis_tick(double now)
 {
     if (now < 1e299) AS.now = now;
-    while (pt < ph && pend[pt % PENDING].t < now - LOOKAHEAD) {
+    bool flush = now >= 1e299;
+    /* with 1090 replies, a query waits until its replies are in */
+    while (pt < ph && pend[pt % PENDING].t < now - LOOKAHEAD &&
+           (flush || !rx_ready || rx_ready(pend[pt % PENDING].t))) {
         uint64_t idx = pt++;
         stage1(&pend[idx % PENDING], idx);
     }
-    if (AS.ob.open && now - LOOKAHEAD - AS.ob.t1 > AS.cfg.burst_gap) close_burst();
+    double front = now - LOOKAHEAD;            /* everything before this went through stage 1 */
+    if (pt < ph && pend[pt % PENDING].t < front) front = pend[pt % PENDING].t;
+    if (AS.ob.open && front - AS.ob.t1 > AS.cfg.burst_gap) close_burst();
     if (now >= 1e299) { close_burst(); drain(-1, -1, false, NULL); }
 }
 

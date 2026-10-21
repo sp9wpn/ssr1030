@@ -27,6 +27,7 @@ struct gpoint {
     uint16_t tok;           /* seq_token */
     uint8_t ka;             /* target index, NO_TARGET when none */
     uint8_t cls;            /* GP_BEAM, GP_SIDE, GP_WEAK */
+    bool ans;               /* answered on 1090 */
 };
 enum { GP_BEAM = 1, GP_SIDE = 2, GP_WEAK = 3 };
 
@@ -43,6 +44,7 @@ struct burst {
     int gcnt[G_COUNT];      /* by query type (tok_group) */
     uint16_t ks[SEQ_MAX];   /* sequence tokens (seq_token) in arrival order */
     uint8_t ka[SEQ_MAX];    /* target index into addrs[], NO_TARGET when none */
+    bool kans[SEQ_MAX];     /* answered on 1090 */
     int nks;
     int naddr;              /* distinct roll-call addresses */
     uint32_t addrs[64];

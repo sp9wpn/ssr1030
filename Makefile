@@ -4,7 +4,7 @@ HACKRF_CFLAGS := $(shell pkg-config --cflags libhackrf 2>/dev/null | sed 's|/lib
 HACKRF_LIBS   := $(shell pkg-config --libs libhackrf 2>/dev/null || echo -lhackrf)
 LDLIBS  = $(HACKRF_LIBS) -lpthread -lm
 
-SRC = src/main.c src/demod.c src/modes.c src/analysis.c src/display.c src/output.c src/adsb.c
+SRC = src/main.c src/demod.c src/modes.c src/analysis.c src/display.c src/output.c src/adsb.c src/rx1090.c src/geo.c
 OBJ = $(SRC:.c=.o)
 
 ssr1030: $(OBJ)

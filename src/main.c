@@ -25,9 +25,9 @@ static void on_sig(int s) { (void)s; stop = 1; }
 static struct {
     double freq, fs;
     int lna, vga, amp;
-    float thr_db, thr_abs;
+    float thr_db, thr_abs, modes_db;
     int dens_max;
-    const char *file, *record, *log, *serial, *adsb_db;
+    const char *file, *record, *log, *serial, *adsb_db, *rx1090, *radar_pos, *rx_pos;
     char sep;
     bool list, dashboard, quiet, show_tcas;
     double duration;
@@ -40,7 +40,7 @@ static struct {
     struct analysis_cfg acfg;
 } opt = {
     .freq = 1030e6, .fs = 16e6, .lna = 32, .vga = 24, .amp = 0,
-    .thr_db = 12, .dens_max = 50, .sep = ',',
+    .thr_db = 12, .modes_db = 7, .dens_max = 50, .sep = ',',
     .adsb_every = 30, .adsb_dwell = 2.9, .lol_radius = 150,
     .agc = true,
     .acfg = { .burst_gap = 0.030, .burst_min = 3, .member_db = 3, .core_db = 6,
@@ -54,6 +54,8 @@ static volatile uint64_t drops;
 static pthread_mutex_t rb_mx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t rb_cv = PTHREAD_COND_INITIALIZER;
 static FILE *recf;
+static double cb_wall;          /* host time when the stream reached cb_pos (--rx1090) */
+static uint64_t cb_pos;
 
 static int rx_cb(hackrf_transfer *t)
 {
@@ -66,6 +68,10 @@ static int rx_cb(hackrf_transfer *t)
         memcpy(rb + off, t->buffer, first);
         memcpy(rb, t->buffer + first, n - first);
         rb_w += n;
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        cb_wall = ts.tv_sec + 1e-9 * ts.tv_nsec;
+        cb_pos = rb_w;
         pthread_cond_signal(&rb_cv);
     }
     pthread_mutex_unlock(&rb_mx);
@@ -298,6 +304,7 @@ static void on_interrog(struct interrog *it, void *ctx)
     (void)ctx;
     it->gain_db = (float)gain_total(cur_gain);
     if (!it->tcas && it->amp_db > win_peak) win_peak = it->amp_db;
+    if (opt.rx1090) rx1090_note_query(it);
     analysis_add(it);
 }
 
@@ -546,6 +553,16 @@ static void usage(void)
 "                         addresses (48af01) or callsigns (LOT3KM; needs --adsb/--adsblol),\n"
 "                         separated by commas or spaces: -A 48af01,LOT3KM,DLH123\n"
 "                         Prefix with cs: to force a callsign that looks like hex\n\n"
+"1090 MHz replies (second receiver, e.g. RTL-SDR running dump1090):\n"
+"      --rx1090 HOST:PORT read dump1090's Beast output (port 30005, start dump1090 with --net);\n"
+"                         roll-called addresses are fed to its Beast input (port 30004)\n"
+"                         and mark answered queries with '*': roll-calls by aircraft address,\n"
+"                         UF11 by the II/SI code in DF11; also supplies callsigns. Mode A/C\n"
+"                         replies are not matched. Live HackRF only\n"
+"      --radar-pos LAT,LON[,ALT_M]  radar position and\n"
+"      --rx-pos LAT,LON[,ALT_M]     1090 antenna position: the reply delay is then predicted from\n"
+"                         each aircraft's ADS-B position, which locks the clock from 2 replies\n"
+"                         and matches replies to within 40 us\n\n"
 "ADS-B callsigns (1090 MHz, HackRF retunes for short windows):\n"
 "  -B, --adsb             listen on 1090 periodically to map addresses to callsigns\n"
 "      --adsb-every S     minimum time between windows (default 30)\n"
@@ -558,6 +575,9 @@ static void usage(void)
 "Detection:\n"
 "      --threshold DB     pulse threshold above noise (default 12)\n"
 "      --threshold-abs A  absolute pulse threshold, magnitude 0-180 (overrides)\n"
+"      --modes-threshold DB  lower pulse threshold for Mode S only (default 7 dB above noise),\n"
+"                         so roll-calls heard through the radar's sidelobes are decoded; Mode A/C\n"
+"                         keeps --threshold. Set it equal to --threshold to turn this off\n"
 "      --dens-max N       max pulses per ms before A/C detections are rejected (default 50)\n\n"
 "Bursts (antenna main beam):\n"
 "      --burst-gap MS     gap that ends a burst (default 30)\n"
@@ -583,6 +603,7 @@ int main(int argc, char **argv)
         { "file", 1, 0, 'f' }, { "record", 1, 0, 'w' }, { "rate", 1, 0, 's' }, { "freq", 1, 0, 1 },
         { "lna", 1, 0, 'l' }, { "vga", 1, 0, 'g' }, { "amp", 1, 0, 'a' }, { "serial", 1, 0, 2 },
         { "duration", 1, 0, 't' }, { "threshold", 1, 0, 3 }, { "threshold-abs", 1, 0, 4 },
+        { "modes-threshold", 1, 0, 21 },
         { "dens-max", 1, 0, 5 }, { "burst-gap", 1, 0, 6 }, { "burst-min", 1, 0, 7 },
         { "member-db", 1, 0, 8 }, { "core-db", 1, 0, 9 }, { "log", 1, 0, 'o' }, { "space", 0, 0, 10 },
         { "list", 0, 0, 'L' }, { "tcas", 0, 0, 11 }, { "dashboard", 0, 0, 'd' }, { "quiet", 0, 0, 'q' },
@@ -590,7 +611,7 @@ int main(int argc, char **argv)
         { "rollcall-only", 0, 0, 'R' }, { "ac-only", 0, 0, 'C' },
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
-        { "no-auto-gain", 0, 0, 17 },
+        { "no-auto-gain", 0, 0, 17 }, { "rx1090", 1, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
         { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
     };
     int c;
@@ -607,6 +628,7 @@ int main(int argc, char **argv)
         case 't': opt.duration = atof(optarg); break;
         case 3: opt.thr_db = atof(optarg); break;
         case 4: opt.thr_abs = atof(optarg); break;
+        case 21: opt.modes_db = atof(optarg); break;
         case 5: opt.dens_max = atoi(optarg); break;
         case 6: opt.acfg.burst_gap = atof(optarg) / 1e3; break;
         case 7: opt.acfg.burst_min = atoi(optarg); break;
@@ -645,6 +667,9 @@ int main(int argc, char **argv)
             break;
         case 16: opt.lol_radius = atoi(optarg); break;
         case 17: opt.agc = false; break;
+        case 18: opt.rx1090 = optarg; break;
+        case 19: opt.radar_pos = optarg; break;
+        case 20: opt.rx_pos = optarg; break;
         default: usage(); return c == 'h' ? 0 : 1;
         }
     }
@@ -656,6 +681,11 @@ int main(int argc, char **argv)
     bool live = opt.file == NULL;
     bool dash = !opt.list && !opt.quiet && (live || opt.dashboard);
     if (opt.adsb && !live) { fprintf(stderr, "--adsb needs the HackRF; ignored in --file mode\n"); opt.adsb = false; }
+    if (opt.rx1090 && !live) { fprintf(stderr, "--rx1090 needs the live HackRF; ignored in --file mode\n"); opt.rx1090 = NULL; }
+    if (opt.rx1090 && opt.adsb) {
+        fprintf(stderr, "--adsb is not needed with --rx1090 (callsigns come from dump1090); ignored\n");
+        opt.adsb = false;
+    }
     bool any_cs = false;
     for (int k = 0; k < opt.acfg.nac; k++) if (opt.acfg.ac[k].addr < 0) any_cs = true;
     if (any_cs && !opt.adsb && !opt.adsb_db && !opt.lol)
@@ -682,11 +712,24 @@ int main(int argc, char **argv)
     analysis_init(&opt.acfg);
     analysis_set_gain(gain_total(cur_gain));
     analysis_set_sink(sink);
-    struct demod *d = demod_new(opt.fs, opt.thr_db, opt.thr_abs, opt.dens_max, on_interrog, NULL);
+    struct demod *d = demod_new(opt.fs, opt.thr_db, opt.thr_abs, opt.modes_db, opt.dens_max, on_interrog, NULL);
 
     int fd = -1;
     hackrf_device *dev = NULL;
-    struct run_info ri = { .fs = opt.fs, .freq = opt.freq, .live = live, .adsb = opt.adsb };
+    struct run_info ri = { .fs = opt.fs, .freq = opt.freq, .live = live, .adsb = opt.adsb, .rx1090 = opt.rx1090 != NULL };
+    if (opt.rx1090) {
+        if (rx1090_start(opt.rx1090) < 0) { fprintf(stderr, "--rx1090: bad address '%s' (HOST:PORT)\n", opt.rx1090); return 1; }
+        analysis_set_rx(rx1090_ready, rx1090_match);
+        if (opt.radar_pos && opt.rx_pos) {
+            double rl, ro, ra, xl, xo, xa;
+            if (geo_parse(opt.radar_pos, &rl, &ro, &ra) < 0 || geo_parse(opt.rx_pos, &xl, &xo, &xa) < 0) {
+                fprintf(stderr, "--radar-pos / --rx-pos: use LAT,LON[,ALT_M] in decimal degrees\n");
+                return 1;
+            }
+            rx1090_set_geometry(rl, ro, ra, xl, xo, xa);
+        } else if (opt.radar_pos || opt.rx_pos)
+            fprintf(stderr, "--radar-pos and --rx-pos are needed together; the geometry lock is off\n");
+    }
     build_filters(ri.filters, sizeof(ri.filters));
     char srcname[300];
 
@@ -758,9 +801,12 @@ int main(int argc, char **argv)
             size_t off = rb_r % RB_SIZE, first = n < RB_SIZE - off ? n : RB_SIZE - off;
             memcpy(buf, rb + off, first);
             memcpy(buf + first, rb, n - first);
+            double cbw = cb_wall;
+            uint64_t cbp = cb_pos;
             pthread_mutex_unlock(&rb_mx);
             pos0 = rb_r;
             rb_r += n;
+            if (opt.rx1090 && cbw > 0) rx1090_hclock(cbp / 2.0 / opt.fs, cbw);
             if (!hackrf_is_streaming(dev) && n == 0) { fprintf(stderr, "HackRF stopped streaming\n"); break; }
         } else {
             ssize_t r = read(fd, buf, CHUNK);
@@ -774,6 +820,11 @@ int main(int argc, char **argv)
             demod_get_stats(d, &st, false);
             now = st.samples / opt.fs;
             analysis_set_floor(st.thr_dbfs);
+            if (opt.rx1090) {
+                static uint64_t seen_drops;
+                if (drops != seen_drops) { seen_drops = drops; rx1090_clock_reset(); }   /* samples lost: time base moved */
+                rx1090_poll(now);
+            }
             analysis_tick(now);
             now_t = now;
             if (live) {
@@ -852,7 +903,9 @@ int main(int argc, char **argv)
         if (recf) fclose(recf);
     }
     demod_flush(d);
+    if (opt.rx1090) rx1090_poll(now);
     analysis_tick(1e300);
+    rx1090_stop();
     if (dash) display_restore();
     kb_restore();
     output_close();
@@ -880,6 +933,16 @@ int main(int argc, char **argv)
         fprintf(sf, "ADS-B: %ld windows, %.1f s on 1090, %ld frames (DF17/18 %ld, DF11 %ld), "
                     "%ld identifications (+%ld Comm-B BDS2,0), %d callsigns known\n",
                 as.windows, as.seconds, as.frames, as.df17, as.df11, as.idents, as.commb_idents, cs_count());
+    }
+    if (opt.rx1090) {
+        struct rx1090_stats x;
+        rx1090_get_stats(&x);
+        fprintf(sf, "1090 replies (dump1090 %s): %ld frames, %ld aircraft with position, clock lock found %ld times%s%s; "
+                    "answered: roll-call %ld/%ld, UF11 %ld/%ld (since the last lock)",
+                x.peer, x.frames, x.npos, x.locks, x.locked ? "" : ", not locked at the end",
+                x.locked && x.geo ? " (from positions)" : "", x.rc_ans, x.rc, x.ac_ans, x.ac);
+        if (x.geo && x.nres) fprintf(sf, "; residual rms %.1f us over %ld matches", x.res_rms_us, x.nres);
+        fputc('\n', sf);
     }
     analysis_print_summary(sf);
     return 0;
