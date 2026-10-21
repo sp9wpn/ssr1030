@@ -1,8 +1,25 @@
 # ssr1030
 
 Live analyser for SSR / Mode S interrogations on 1030 MHz, received with a HackRF.
-It is based on [dump1030](https://github.com/Fuziih/dump1030). dump1030 only pattern-matches pulses at 2.5 MS/s.
-ssr1030 samples at 16 MS/s and fully decodes the Mode S uplink DPSK.
+It is based on [dump1030](https://github.com/Fuziih/dump1030).
+
+## Features
+
+- **Full Mode S uplink decoding** at 16 MS/s: UF4/5/11/20/21/24, aircraft address, II/SI code and the requested Comm-B register (BDS).
+- **Mode A/C and intermode:** plain Mode A/C, A/C-only and A/C/S all-calls; P2/P5 sidelobe suppression is measured for every query.
+- **Radar analysis:** main-beam bursts, rotation period, dwell time, interrogation sequence within the beam, several radars told apart by their codes.
+- **Sidelobe roll-calls:** Mode S heard through the radar's sidelobes, aimed at aircraft in other directions.
+- **Callsigns:** from short ADS-B windows on 1090 MHz, from [adsb.lol](https://adsb.lol), or from dump1090.
+- **Answered or not:** with a second receiver (RTL-SDR running dump1090), matches 1090 MHz replies to the interrogations, marks answered ones and decodes what the aircraft replied (altitude, squawk, BDS 2,0/4,0/5,0/6,0).
+- **Live dashboard** with automatic gain, filters by radar, aircraft and interrogation type, and a burst chart. CSV log, IQ recording and replay.
+
+![Dashboard](docs/dashboard.png)
+
+*Dashboard: interrogation counts by type, Comm-B registers, radars, recent bursts and the sequence inside the beam.*
+
+![Burst chart](docs/burst-chart.png)
+
+*Burst chart (`b`): every interrogation around one main-beam burst, with its level and the P2/P5 suppression pulse. Dotted rows came through the sidelobes.*
 
 ## Build
 
