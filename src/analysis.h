@@ -28,6 +28,8 @@ struct gpoint {
     uint8_t ka;             /* target index, NO_TARGET when none */
     uint8_t cls;            /* GP_BEAM, GP_SIDE, GP_WEAK */
     bool ans;               /* answered on 1090 */
+    uint8_t rep_n;          /* matched replies, rx1090 records rep_idx.. */
+    uint64_t rep_idx;
 };
 enum { GP_BEAM = 1, GP_SIDE = 2, GP_WEAK = 3 };
 

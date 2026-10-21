@@ -464,7 +464,7 @@ static bool graph_extra_ok(const struct interrog *y)
 }
 
 static void graph_put(struct burst *b, double t, float amp, float p2, float p5, uint32_t addr, uint16_t tok,
-                      int ka, int cls, bool ans)
+                      int ka, int cls, bool ans, uint64_t rep_idx, int rep_n)
 {
     if (b->ngp >= SEQ_MAX) return;
     struct gpoint *g = &b->gp[b->ngp++];
@@ -477,6 +477,8 @@ static void graph_put(struct burst *b, double t, float amp, float p2, float p5, 
     g->ka = (uint8_t)ka;
     g->cls = (uint8_t)cls;
     g->ans = ans;
+    g->rep_idx = rep_idx;
+    g->rep_n = (uint8_t)rep_n;
     if (cls == GP_SIDE) b->nside++;
     if (cls == GP_WEAK) b->nweak++;
 }
@@ -495,7 +497,7 @@ static uint32_t gaddr(const struct interrog *y) { return directed(y->kind) ? y->
 
 static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka)
 {
-    graph_put(b, y->t, y->amp_db, abs_p2(y), abs_p5(y), gaddr(y), seq_token(y), ka, cls, y->answered);
+    graph_put(b, y->t, y->amp_db, abs_p2(y), abs_p5(y), gaddr(y), seq_token(y), ka, cls, y->answered, y->rep_idx, y->rep_n);
 }
 
 /* Non-beam queries for the graph. Sidelobes are kept from 60 % of a rotation
@@ -504,7 +506,9 @@ static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka
  * queries that arrive after a burst was committed. */
 #define GRING 16384
 #define NPOST 8
-static struct { double t; float amp, p2, p5; uint32_t addr; uint16_t tok; uint8_t cls; bool ans; } gring[GRING];
+static struct {
+    double t; float amp, p2, p5; uint32_t addr; uint16_t tok; uint8_t cls; bool ans; uint8_t rep_n; uint64_t rep_idx;
+} gring[GRING];
 static uint64_t gring_n;
 static struct { int idx; double until_side, until_weak; } posts[NPOST];
 static int nposts;
@@ -518,11 +522,12 @@ static void graph_note(const struct interrog *y)
         double until = cls == GP_SIDE ? posts[p].until_side : posts[p].until_weak;
         if (y->t <= until && AS.nhist - posts[p].idx <= BURST_HIST)
             graph_put(&AS.hist[posts[p].idx % BURST_HIST], y->t, y->amp_db, abs_p2(y), abs_p5(y), gaddr(y), tok,
-                      NO_TARGET, cls, y->answered);
+                      NO_TARGET, cls, y->answered, y->rep_idx, y->rep_n);
     }
     int i = gring_n++ % GRING;
     gring[i].t = y->t; gring[i].amp = y->amp_db; gring[i].tok = tok; gring[i].cls = (uint8_t)cls;
     gring[i].p2 = abs_p2(y); gring[i].p5 = abs_p5(y); gring[i].addr = gaddr(y); gring[i].ans = y->answered;
+    gring[i].rep_idx = y->rep_idx; gring[i].rep_n = y->rep_n;
 }
 
 static int cmp_gp(const void *x, const void *y)
@@ -552,7 +557,7 @@ static void graph_context(struct burst *b, double t0, double t1, double margin, 
         double hi = gring[i].cls == GP_SIDE ? t1 + half : t1 + margin;
         if (gring[i].t < lo || gring[i].t > hi) continue;
         graph_put(b, gring[i].t, gring[i].amp, gring[i].p2, gring[i].p5, gring[i].addr, gring[i].tok, NO_TARGET,
-                  gring[i].cls, gring[i].ans);
+                  gring[i].cls, gring[i].ans, gring[i].rep_idx, gring[i].rep_n);
     }
     qsort(b->gp, b->ngp, sizeof(b->gp[0]), cmp_gp);
 }

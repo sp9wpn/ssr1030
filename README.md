@@ -78,6 +78,17 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - Locking needs a few heard replies from roll-called aircraft within 60 s. With the 1090 antenna placed so that it hears few of the radar's targets, this can take a while.
 - **No `*` does not mean no reply.** The second receiver hears only some replies (antenna placement, range), so an unmarked query may have been answered.
 - **Delay:** queries pass to the analysis only after their replies could have arrived, so the dashboard runs about 0.1–0.6 s behind. `--net-ro-interval 0.05` keeps dump1090's part of that small (its default is 0.5 s).
+- **Replies in the burst chart (`b`):** each matched reply gets a row under its query: DF, delay after the query, residual against the position-based prediction, and the decoded content.
+  - DF4/20: altitude. DF5/21: squawk. DF11: the replying aircraft (one row each).
+  - DF20/21: also the register the query asked for: BDS 2,0 callsign; 4,0 selected altitude (MCP/FMS) and QNH; 5,0 roll, track, ground speed, turn rate, TAS; 6,0 heading, IAS, Mach, vertical rates.
+  - The header shows `replies N`.
+  ```
+       22.78 ms  alt          RYR48SC*      -16.4 ███████████████████████
+                 ↳ DF4   131.6 µs  res +0.1  alt 8950 ft
+       34.33 ms  sqk          RYR48SC*      -16.9 ██████████████████████
+                 ↳ DF5   131.4 µs  res -0.1  squawk 6162
+  ```
+- **Autofreeze (`F`):** arms a one-shot freeze. The first burst with a matched reply freezes the screen and opens it in the burst chart; `space` returns to live. The status line shows `AUTOFREEZE` while armed. Without `--rx1090`, `F` only shows a hint. Add `--beep` to ring the terminal bell when it triggers.
 - **Callsigns:** DF17 identification and Comm-B BDS 2,0 from dump1090 fill the callsign table, so `-B` is not needed (and is ignored).
 - **Debug:** `RX1090_DEBUG=1` prints each lock attempt to stderr. `RX1090_LOG=FILE` writes every reply (12 MHz time in s, DF, address, II/SI code, hex) and the clock data, for offline analysis.
 
@@ -108,6 +119,7 @@ Dashboard keys:
 | `R` | Roll-calls only on/off (same as `-R`) |
 | `b` | Burst graph screen on/off (see below) |
 | `space` | Freeze the screen on/off: data collection continues. On the burst chart the shown burst is pinned and stays scrollable |
+| `F` | With `--rx1090`: autofreeze, freeze on the first burst with matched 1090 replies and show it in the burst chart |
 | `x` | Reset statistics |
 
 - **Manual gain:** `+ - L l p` switch the gain to manual.

@@ -64,6 +64,8 @@ struct interrog {
     uint8_t nreplies;   /* UF11: DF11 replies matched */
     float reply_us;     /* reply delay after the query, us (128 us turnaround + extra path) */
     float reply_res_us; /* measured - predicted from the aircraft's position (geometry lock), NAN unknown */
+    uint64_t rep_idx;   /* first matched reply in the rx1090 record store, rep_n of them */
+    uint8_t rep_n;
 };
 
 /* ---- demod.c ---- */
@@ -170,6 +172,14 @@ double geo_dist(const double a[3], const double b[3]);
 int geo_parse(const char *s, double *lat, double *lon, double *alt_m);   /* "LAT,LON[,ALT_M]", -1 on error */
 
 /* ---- rx1090.c ---- */
+struct rx1090_rec {         /* a reply matched to a query, kept for display */
+    uint8_t df, len;        /* len: bytes */
+    uint8_t msg[14];
+    float delay_us, res_us; /* res_us NAN without a position */
+    int req_bds;            /* register the query asked for (BDS1*16+BDS2), -1 none */
+};
+const struct rx1090_rec *rx1090_rec_get(uint64_t idx);   /* NULL once overwritten */
+void reply_describe(const struct rx1090_rec *r, char *buf, size_t n);   /* modes.c: decoded content */
 struct rx1090_stats {
     bool connected, locked;
     bool feeding;           /* roll-called addresses are announced to dump1090 */
@@ -213,6 +223,7 @@ struct run_info {
     bool agc;              /* automatic gain */
     bool graph;            /* burst graph screen instead of the dashboard */
     bool frozen;           /* space: screen frozen, data collection continues */
+    bool autofreeze;       /* F: freeze on the first burst with matched replies */
     bool cmd_mode;         /* filter input line open */
     char cmd_kind;         /* 'r' radar or 'a' aircraft */
     char cmd[160];
@@ -225,6 +236,7 @@ void display_init(void);
 void display_restore(void);
 void display_render(const struct run_info *ri, double now, struct demod *d, uint64_t drops);
 void display_graph_key(int key);
+void display_graph_pin(int burst_id);   /* show this burst in the graph (autofreeze) */
 void display_status_only(const struct run_info *ri);   /* frozen dashboard: redraw the bottom row only */   /* 'U' 'D' 'P' 'N' 'H' 'E': scroll the burst graph */
 
 /* ---- output.c ---- */

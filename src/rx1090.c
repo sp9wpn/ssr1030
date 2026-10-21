@@ -68,9 +68,10 @@
 #define TURNAROUND  128e-6          /* Mode S reply delay after the sync phase reversal */
 #define C_LIGHT     299792458.0
 #define RES_N       64
+#define REC_N       16384           /* matched replies kept for display */
 
 struct raw { uint64_t ts; double wall; uint8_t len; uint8_t msg[14]; };
-struct reply { double r; uint32_t addr; int16_t code; uint8_t df; bool used; };
+struct reply { double r; uint32_t addr; int16_t code; uint8_t df, len; bool used; uint8_t msg[14]; };
 struct qrec { double t; uint32_t addr; int kind, code; };    /* roll-calls and UF11 (code) */
 struct acd {
     uint32_t addr;
@@ -105,6 +106,8 @@ static bool locked, lock_geo;
 static bool geo_on;
 static double g_radar[3], g_rx[3], g_d0, g_ref_lat, g_ref_lon;
 static double res[RES_N];
+static struct rx1090_rec recs[REC_N];
+static uint64_t nrec;
 static long nres;
 static double c_off, c_k, c_t0;             /* off(t) = c_off + c_k (t - c_t0) */
 static double last_try;
@@ -562,7 +565,8 @@ void rx1090_poll(double t_now)
                 memcpy(a->ecef, e, sizeof(e)); a->pos = true; a->pos_r = r;
             }
         }
-        struct reply y = { .r = r, .df = (uint8_t)df, .code = -1, .addr = NO_ADDR_RX };
+        struct reply y = { .r = r, .df = (uint8_t)df, .code = -1, .addr = NO_ADDR_RX, .len = w->len };
+        memcpy(y.msg, w->msg, w->len);
         if (df == 11 && nbits == 56) {
             if (syn & ~0x7Fu) continue;
             int cl = syn >> 4 & 7, ic = syn & 15;
@@ -616,6 +620,24 @@ static void clock_update(double t, double e)
     c_t0 = t;
 }
 
+/* keep a matched reply for display; the query points at its replies */
+static void keep(struct interrog *x, const struct reply *y, double d, float res_us, int req)
+{
+    struct rx1090_rec *k = &recs[nrec++ % REC_N];
+    k->df = y->df;
+    k->len = y->len;
+    memcpy(k->msg, y->msg, y->len);
+    k->delay_us = (float)(d * 1e6);
+    k->res_us = res_us;
+    k->req_bds = req;
+    if (x->rep_n < 255) x->rep_n++;
+}
+
+const struct rx1090_rec *rx1090_rec_get(uint64_t idx)
+{
+    return idx < nrec && nrec - idx <= REC_N ? &recs[idx % REC_N] : NULL;
+}
+
 void rx1090_match(struct interrog *x)
 {
     x->answered = false;
@@ -624,11 +646,15 @@ void rx1090_match(struct interrog *x)
     x->reply_us = NAN;
     x->reply_res_us = NAN;
     x->checked = false;
+    x->rep_n = 0;
     if (!locked || x->tcas) return;
     bool rc = rollcall(x->kind);
     int code = x->kind == K_UF11 ? modes_own_code(x) : -1;
     if (!rc && code <= 0) return;           /* code 0 = II0: indistinguishable from squitters */
     x->checked = true;
+    x->rep_idx = nrec;
+    int req = -1, b1, b2;
+    if (rc && modes_bds(x->msg, &b1, &b2)) req = b1 * 16 + b2;
 
     double off = off_at(x->t), lo = x->t + off + WIN_LO, hi = x->t + off + WIN_HI;
     uint64_t j = first_at(lo);
@@ -673,6 +699,7 @@ void rx1090_match(struct interrog *x)
         x->answered = true;
         x->reply_df = best->df;
         x->reply_us = (float)(bd * 1e6);
+        keep(x, best, bd, x->reply_res_us, req);
         S.rc_ans++;
         if (!a) a = ac_get(x->addr, true);
         if (a) { a->delay = best->r - x->t - off_at(x->t); a->t = x->t; }
@@ -694,6 +721,7 @@ void rx1090_match(struct interrog *x)
                 clock_update(x->t, d - pd);
                 res[nres++ % RES_N] = d - pd;
             }
+            keep(x, y, d, pos ? (float)((d - pd) * 1e6) : NAN, -1);
             if (x->nreplies < 255) x->nreplies++;
         }
         if (x->nreplies) { x->answered = true; x->reply_df = 11; S.ac_ans++; }

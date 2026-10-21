@@ -264,3 +264,113 @@ const char *seq_token_str(uint16_t t, char *buf, size_t len)
     else snprintf(buf, len, named ? "%s" : "S-%s", a);
     return buf;
 }
+
+/* ---------------- downlink (1090 MHz replies) ---------------- */
+
+/* 13-bit identity / altitude field (bits 20-32: C1 A1 C2 A2 C4 A4 X B1 D1 B2 D2 B4 D4)
+ * in 0xABCD layout, one octal digit per nibble */
+static unsigned abcd13(unsigned v)
+{
+#define B13(n) ((v >> (13 - (n))) & 1)
+    return B13(6) << 14 | B13(4) << 13 | B13(2) << 12 | B13(12) << 10 | B13(10) << 9 | B13(8) << 8 |
+           B13(5) << 6 | B13(3) << 5 | B13(1) << 4 | B13(13) << 2 | B13(11) << 1 | B13(9);
+#undef B13
+}
+
+/* Gillham (Mode C) code in 0xABCD layout -> altitude in 100 ft, INT32_MIN if invalid */
+static int gillham(unsigned a)
+{
+    if ((a & 0xFFFF8889) || !(a & 0xF0)) return INT32_MIN;
+    unsigned h = 0, f = 0;
+    if (a & 0x10) h ^= 7;
+    if (a & 0x20) h ^= 3;
+    if (a & 0x40) h ^= 1;
+    if ((h & 5) == 5) h ^= 2;
+    if (h > 5) return INT32_MIN;
+    if (a & 0x0002) f ^= 0xFF;
+    if (a & 0x0004) f ^= 0x7F;
+    if (a & 0x1000) f ^= 0x3F;
+    if (a & 0x2000) f ^= 0x1F;
+    if (a & 0x4000) f ^= 0x0F;
+    if (a & 0x0100) f ^= 0x07;
+    if (a & 0x0200) f ^= 0x03;
+    if (a & 0x0400) f ^= 0x01;
+    if (f & 1) h = 6 - h;
+    return (int)(f * 5 + h) - 13;
+}
+
+static int alt13(unsigned v, char *buf, size_t n)
+{
+    if (!v) return snprintf(buf, n, "alt -");
+    if (v & 0x40) return snprintf(buf, n, "alt (metric)");
+    if (v & 0x10) return snprintf(buf, n, "alt %d ft", (int)(((v & 0x1F80) >> 2 | (v & 0x20) >> 1 | (v & 0x0F)) * 25) - 1000);
+    int h = gillham(abcd13(v));
+    return h == INT32_MIN ? snprintf(buf, n, "alt ?") : snprintf(buf, n, "alt %d ft", h * 100);
+}
+
+/* signed field with a separate sign bit before it */
+static double sgn(const uint8_t *m, int sbit, int first, int last)
+{
+    int v = (int)getbits(m, first, last);
+    return getbits(m, sbit, sbit) ? v - (1 << (last - first + 1)) : v;
+}
+
+static const char ais[] = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ##### ###############0123456789######";
+
+/* Comm-B content of the register the query asked for (MB = bits 33-88) */
+static void commb(const uint8_t *m, int bds, char *buf, size_t n)
+{
+    int o = snprintf(buf, n, "  BDS %X,%X:", bds >> 4, bds & 15);
+    switch (bds) {
+    case 0x20: {
+        char cs[9];
+        for (int k = 0; k < 8; k++) cs[k] = ais[getbits(m, 41 + 6 * k, 46 + 6 * k)];
+        cs[8] = 0;
+        for (int k = 7; k >= 0 && cs[k] == ' '; k--) cs[k] = 0;
+        snprintf(buf + o, n - o, getbits(m, 33, 40) == 0x20 ? " id %s" : " (not BDS 2,0)", cs);
+        return;
+    }
+    case 0x40:
+        if (getbits(m, 33, 33)) o += snprintf(buf + o, n - o, " MCP alt %u ft", getbits(m, 34, 45) * 16);
+        if (getbits(m, 46, 46)) o += snprintf(buf + o, n - o, " FMS alt %u ft", getbits(m, 47, 58) * 16);
+        if (getbits(m, 59, 59)) snprintf(buf + o, n - o, " QNH %.1f hPa", getbits(m, 60, 71) * 0.1 + 800);
+        return;
+    case 0x50:
+        if (getbits(m, 33, 33)) o += snprintf(buf + o, n - o, " roll %+.1f°", sgn(m, 34, 35, 43) * 45.0 / 256);
+        if (getbits(m, 44, 44)) o += snprintf(buf + o, n - o, " track %.1f°", fmod(sgn(m, 45, 46, 55) * 90.0 / 512 + 360, 360));
+        if (getbits(m, 56, 56)) o += snprintf(buf + o, n - o, " GS %u kt", getbits(m, 57, 66) * 2);
+        if (getbits(m, 67, 67)) o += snprintf(buf + o, n - o, " turn %+.2f°/s", sgn(m, 68, 69, 77) * 8.0 / 256);
+        if (getbits(m, 78, 78)) snprintf(buf + o, n - o, " TAS %u kt", getbits(m, 79, 88) * 2);
+        return;
+    case 0x60:
+        if (getbits(m, 33, 33)) o += snprintf(buf + o, n - o, " hdg %.1f°", fmod(sgn(m, 34, 35, 44) * 90.0 / 512 + 360, 360));
+        if (getbits(m, 45, 45)) o += snprintf(buf + o, n - o, " IAS %u kt", getbits(m, 46, 55));
+        if (getbits(m, 56, 56)) o += snprintf(buf + o, n - o, " M%.3f", getbits(m, 57, 66) * 2.048 / 512);
+        if (getbits(m, 67, 67)) o += snprintf(buf + o, n - o, " baro %+.0f ft/min", sgn(m, 68, 69, 77) * 32);
+        if (getbits(m, 78, 78)) snprintf(buf + o, n - o, " inertial %+.0f ft/min", sgn(m, 79, 80, 88) * 32);
+        return;
+    default:
+        o += snprintf(buf + o, n - o, " MB ");
+        for (int k = 4; k < 11 && o + 3 < (int)n; k++) o += snprintf(buf + o, n - o, "%02x", m[k]);
+    }
+}
+
+void reply_describe(const struct rx1090_rec *r, char *buf, size_t n)
+{
+    const uint8_t *m = r->msg;
+    int o = 0;
+    switch (r->df) {
+    case 11: {
+        const char *cs = cs_lookup(getbits(m, 9, 32));
+        o = snprintf(buf, n, "%06x%s%s", getbits(m, 9, 32), cs ? " " : "", cs ? cs : "");
+        break;
+    }
+    case 4: case 20: o = alt13(getbits(m, 20, 32), buf, n); break;
+    case 5: case 21: o = snprintf(buf, n, "squawk %04x", abcd13(getbits(m, 20, 32))); break;
+    default: o = snprintf(buf, n, "DF%d", r->df);
+    }
+    if ((r->df == 20 || r->df == 21) && r->len == 14 && o < (int)n) {
+        if (r->req_bds >= 0) commb(m, r->req_bds, buf + o, n - o);
+        else snprintf(buf + o, n - o, "  Comm-B (no register requested)");
+    }
+}

@@ -11,6 +11,7 @@
 #define RED "\033[31m"
 #define YEL "\033[33m"
 #define GRN "\033[32m"
+#define CYN "\033[36m"
 #define DIM "\033[2m"
 #define EL  "\033[K\n"
 
@@ -113,6 +114,7 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
     char line[512];
     int o = 0;
     if (ri->frozen) o += snprintf(line + o, sizeof(line) - o, "\033[1;7m FROZEN \033[0m ");
+    else if (ri->autofreeze) o += snprintf(line + o, sizeof(line) - o, "\033[1;7;36m AUTOFREEZE \033[0m ");
     if (ri->cmd_mode)
         snprintf(line + o, sizeof(line) - o, B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R,
                  ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
@@ -121,9 +123,10 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
                  ri->cmd_msg);
     else if (ri->graph)
         snprintf(line + o, sizeof(line) - o, DIM "keys: b dashboard  \u2191\u2193 PgUp PgDn Home End scroll  r radar filter  a aircraft filter  "
-                 "S Mode S only  R roll-calls only  space freeze  q quit" R);
+                 "S Mode S only  R roll-calls only  space freeze%s  q quit" R, ri->rx1090 ? "  F autofreeze" : "");
     else snprintf(line + o, sizeof(line) - o, DIM "keys: q quit  +/- VGA  L/l LNA (manual)  p RF amp  g auto gain  r radar filter  a aircraft filter  "
-                  "S Mode S only  R roll-calls only  b burst graph  space freeze  x reset stats" R);
+                  "S Mode S only  R roll-calls only  b burst graph  space freeze%s  x reset stats" R,
+                  ri->rx1090 ? "  F autofreeze" : "");
     /* on the last row one column stays free so the terminal never wraps/scrolls */
     put_cut(line, term_cols() - 1);
     fputs(last_row ? "\033[K" : EL, stdout);
@@ -141,6 +144,9 @@ static const char *gp_color(int cls) { return cls == GP_BEAM ? GRN : cls == GP_S
 
 static int g_scroll, g_burst = -1, g_page = 20, g_key;
 static bool frozen_view;
+static int pin = -1;               /* burst kept on screen while frozen */
+
+void display_graph_pin(int burst_id) { pin = burst_id; g_burst = -1; }
 
 void display_graph_key(int key)
 {
@@ -150,7 +156,6 @@ void display_graph_key(int key)
 static void draw_graph(int cols, int rows)
 {
     /* frozen: keep showing the pinned burst while it is still in the history */
-    static int pin = -1;
     const struct burst *b = NULL;
     if (frozen_view && pin >= 0) {
         int lim = AS.nhist < BURST_HIST ? AS.nhist : BURST_HIST;
@@ -199,14 +204,20 @@ static void draw_graph(int cols, int rows)
     g_key = 0;
     if (g_scroll > n - page) g_scroll = n - page;
     if (g_scroll < 0) g_scroll = 0;
-    int last = g_scroll + page < n ? g_scroll + page : n;
+    /* 1090 replies take a row each under their query: fill the page by rows */
+    int last = g_scroll, used = 0, nrep = 0;
+    for (int i = 0; i < n; i++) nrep += b->gp[i].rep_n;
+    while (last < n && used + 1 + b->gp[last].rep_n <= page) used += 1 + b->gp[last++].rep_n;
+    if (last == g_scroll && last < n) last++;      /* a query with more replies than the page: show it anyway */
 
     {
         char hdr[256];
-        snprintf(hdr, sizeof(hdr), B "Burst #%d %s%s" R "  dur %.1f ms  peak %.1f dBFS  gain %.0f dB  beam %d  sidelobe %d  weak %d"
+        char rp[24] = "";
+        if (nrep) snprintf(rp, sizeof(rp), "  " CYN "replies %d" R, nrep);
+        snprintf(hdr, sizeof(hdr), B "Burst #%d %s%s" R "  dur %.1f ms  peak %.1f dBFS  gain %.0f dB  beam %d  sidelobe %d  weak %d%s"
                  DIM "  rows %d-%d/%d  bars %.0f..%+.0f dBFS" R,
                  b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n, b->nside,
-                 b->nweak, g_scroll + 1, last, n, GRAPH_BOT_DBFS, GRAPH_TOP_DBFS);
+                 b->nweak, rp, g_scroll + 1, last, n, GRAPH_BOT_DBFS, GRAPH_TOP_DBFS);
         put_cut(hdr, cols - 1);
         fputs(EL, stdout);
     }
@@ -252,6 +263,20 @@ static void draw_graph(int cols, int rows)
             }
         }
         fputs(R EL, stdout);
+        /* matched 1090 replies, one row each */
+        for (int k = 0; k < g->rep_n; k++) {
+            const struct rx1090_rec *r = rx1090_rec_get(g->rep_idx + k);
+            char line[320], c[200];
+            if (!r) { snprintf(line, sizeof(line), "%15s" DIM "\u21b3 (reply no longer stored)" R, ""); }
+            else {
+                char res[24] = "";
+                if (!isnan(r->res_us)) snprintf(res, sizeof(res), "  res %+.1f", r->res_us);
+                reply_describe(r, c, sizeof(c));
+                snprintf(line, sizeof(line), "%15s" CYN "\u21b3 DF%-2d %6.1f \u00b5s%s  %s" R, "", r->df, r->delay_us, res, c);
+            }
+            put_cut(line, cols - 1);
+            fputs(EL, stdout);
+        }
     }
 }
 

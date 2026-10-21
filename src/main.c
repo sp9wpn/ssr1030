@@ -29,7 +29,7 @@ static struct {
     int dens_max;
     const char *file, *record, *log, *serial, *adsb_db, *rx1090, *radar_pos, *rx_pos;
     char sep;
-    bool list, dashboard, quiet, show_tcas;
+    bool list, dashboard, quiet, show_tcas, beep;
     double duration;
     bool adsb;
     double adsb_every, adsb_dwell;
@@ -363,6 +363,7 @@ static void build_filters(char *buf, size_t n)
 static bool show_graph;               /* 'b': burst graph screen */
 static bool frozen;                   /* space: freeze the screen */
 static bool force_full;               /* one full redraw (screen switched while frozen) */
+static bool autofreeze;               /* 'F': freeze on the first burst with matched 1090 replies */
 static char edit_kind;                /* 'r', 'a' or 0 when not editing */
 static char cmd_buf[160];
 static int cmd_len;
@@ -503,6 +504,13 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             else cmd_msg[0] = 0;
             manual = false;
             break;
+        case 'F':
+            if (!opt.rx1090) { snprintf(cmd_msg, sizeof(cmd_msg), "autofreeze needs --rx1090 (1090 MHz replies)"); break; }
+            autofreeze = !autofreeze;
+            snprintf(cmd_msg, sizeof(cmd_msg), autofreeze ? "autofreeze armed: freezes on the first burst with matched replies"
+                                                         : "autofreeze off");
+            manual = false;
+            break;
         case 'x': case 'X':
             analysis_init(&opt.acfg);
             analysis_set_gain(gain_total(cur_gain));
@@ -518,6 +526,7 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
     }
     ri->graph = show_graph;
     ri->frozen = frozen;
+    ri->autofreeze = autofreeze;
     ri->cmd_mode = edit_kind != 0;
     ri->cmd_kind = edit_kind;
     snprintf(ri->cmd, sizeof(ri->cmd), "%.*s", cmd_len, cmd_buf);
@@ -562,7 +571,8 @@ static void usage(void)
 "      --radar-pos LAT,LON[,ALT_M]  radar position and\n"
 "      --rx-pos LAT,LON[,ALT_M]     1090 antenna position: the reply delay is then predicted from\n"
 "                         each aircraft's ADS-B position, which locks the clock from 2 replies\n"
-"                         and matches replies to within 40 us\n\n"
+"                         and matches replies to within 40 us\n"
+"      --beep             ring the terminal bell when autofreeze (key F) triggers\n\n"
 "ADS-B callsigns (1090 MHz, HackRF retunes for short windows):\n"
 "  -B, --adsb             listen on 1090 periodically to map addresses to callsigns\n"
 "      --adsb-every S     minimum time between windows (default 30)\n"
@@ -594,7 +604,9 @@ static void usage(void)
 "Keys (dashboard): q quit, +/- VGA, L/l LNA, p RF amp (any of these: manual gain), g auto gain,\n"
 "                  r radar filter, a aircraft filter (type it, Enter; empty clears),\n"
 "                  S Mode S only on/off, R roll-calls only on/off, b burst graph, space freeze screen,\n"
-"                  x reset statistics\n");
+"                  x reset statistics\n"
+"                  With --rx1090: F autofreeze (freeze on the first burst with matched replies and\n"
+"                  show it in the burst graph, which lists each reply under its query)\n");
 }
 
 int main(int argc, char **argv)
@@ -612,6 +624,7 @@ int main(int argc, char **argv)
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
         { "no-auto-gain", 0, 0, 17 }, { "rx1090", 1, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
+        { "beep", 0, 0, 22 },
         { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
     };
     int c;
@@ -629,6 +642,7 @@ int main(int argc, char **argv)
         case 3: opt.thr_db = atof(optarg); break;
         case 4: opt.thr_abs = atof(optarg); break;
         case 21: opt.modes_db = atof(optarg); break;
+        case 22: opt.beep = true; break;
         case 5: opt.dens_max = atoi(optarg); break;
         case 6: opt.acfg.burst_gap = atof(optarg) / 1e3; break;
         case 7: opt.acfg.burst_min = atoi(optarg); break;
@@ -834,6 +848,18 @@ int main(int argc, char **argv)
                 while (seen_hist < AS.nhist) {
                     const struct burst *b = &AS.hist[seen_hist % BURST_HIST];
                     if (code != -2 && b->code == code) { agc_burst(dev, b, d); last_main_burst = now; }
+                    if (autofreeze && !frozen) {
+                        int nrep = 0;
+                        for (int k = 0; k < b->ngp; k++) nrep += b->gp[k].rep_n;
+                        if (nrep) {
+                            autofreeze = false;
+                            frozen = show_graph = force_full = true;
+                            display_graph_pin(b->id);
+                            if (opt.beep) { fputs("\a", stdout); fflush(stdout); }
+                            snprintf(cmd_msg, sizeof(cmd_msg), "autofreeze: burst #%d %s, %d matched repl%s (space: live)",
+                                     b->id, b->key, nrep, nrep == 1 ? "y" : "ies");
+                        }
+                    }
                     seen_hist++;
                 }
                 agc_idle(dev, now - last_main_burst, analysis_rotation());
