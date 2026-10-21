@@ -21,7 +21,7 @@ static uint64_t last_samples, last_clip, last_pulses, last_clip_prev, last_sampl
 static struct { double t; long total[K_COUNT], commb[K_COUNT]; long bds[256]; } snap[SNAP_N];
 static int nsnap;
 static double last_now = -1;
-static float rate[K_COUNT], commb_rate[K_COUNT], bds_rate[256];   /* per minute */
+static float krate[64], bds_rate[256];   /* per minute, per krows row / BDS */
 
 /* spaces needed to pad s to w visible columns (escape sequences excluded) */
 static int pad_to(const char *s, int w)
@@ -350,10 +350,9 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
             old = j;
         }
         double span = now - snap[old].t;
-        for (int k = 0; k < K_COUNT; k++) {
-            rate[k] = span > 0 ? (float)((AS.total[k] - snap[old].total[k]) * 60.0 / span) : 0;
-            commb_rate[k] = span > 0 ? (float)((AS.commb[k] - snap[old].commb[k]) * 60.0 / span) : 0;
-        }
+        for (int i = 0; i < nkrows && i < 64; i++)
+            krate[i] = span > 0 ? (float)((krow_count(&krows[i], AS.total, AS.commb)
+                                           - krow_count(&krows[i], snap[old].total, snap[old].commb)) * 60.0 / span) : 0;
         for (int b = 0; b < 256; b++)
             bds_rate[b] = span > 0 ? (float)((AS.bds[b] - snap[old].bds[b]) * 60.0 / span) : 0;
     }
@@ -476,14 +475,12 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     char left[24][80], mid[24][96], right[24][160];
     int nl = 0, nm = 0, nr = 0;
     snprintf(left[nl++], 80, B "%-24s %8s %7s %7s %6s" R, "Interrogation", "total", "in-beam", "sidelb", "/min");
-    for (int k = 0; k < K_COUNT && nl < 24; k++) {
-        if (!AS.total[k] || k == K_UF0 || k == K_UF16) continue;
-        snprintf(left[nl++], 80, "%-24s %8ld %7ld %7ld %6.0f", kind_label(k), AS.total[k], AS.inbeam[k],
-                 AS.side[k], rate[k]);
-        if (AS.commb[k] && nl < 24)          /* RR >= 16: the reply is DF20 (altitude) or DF21 (identity) */
-            snprintf(left[nl++], 80, "  %-22s %8ld %7ld %7ld %6.0f",
-                     k == K_UF5 || k == K_UF21 ? "Comm-B req -> DF21" : "Comm-B req -> DF20",
-                     AS.commb[k], AS.commb_inbeam[k], AS.commb_side[k], commb_rate[k]);
+    for (int i = 0; i < nkrows && i < 64 && nl < 24; i++) {
+        const struct krow *r = &krows[i];
+        long tot = krow_count(r, AS.total, AS.commb);
+        if (tot)
+            snprintf(left[nl++], 80, "%-24s %8ld %7ld %7ld %6.0f", r->label ? r->label : kind_label(r->k), tot,
+                     krow_count(r, AS.inbeam, AS.commb_inbeam), krow_count(r, AS.side, AS.commb_side), krate[i]);
     }
     if (nl == 1) snprintf(left[nl++], 80, DIM "(no radar interrogations yet)" R);
 

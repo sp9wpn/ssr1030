@@ -565,6 +565,27 @@ static void graph_context(struct burst *b, double t0, double t1, double margin, 
     qsort(b->gp, b->ngp, sizeof(b->gp[0]), cmp_gp);
 }
 
+const struct krow krows[] = {
+    { NULL, K_MODE1, 0 }, { NULL, K_MODE2, 0 }, { NULL, K_MODEA, 0 }, { NULL, K_MODEB, 0 }, { NULL, K_MODEC, 0 },
+    { NULL, K_MODED, 0 }, { NULL, K_ACONLY_A, 0 }, { NULL, K_ACONLY_C, 0 }, { NULL, K_ACS_A, 0 },
+    { NULL, K_ACS_C, 0 }, { NULL, K_INTERMODE_OTHER, 0 },
+    { NULL, K_UF4, 1 }, { NULL, K_UF5, 1 }, { NULL, K_UF11, 0 }, { NULL, K_UF20, 0 }, { NULL, K_UF21, 0 },
+    { "UF4  Comm-B req -> DF20", K_UF4, 2 }, { "UF5  Comm-B req -> DF21", K_UF5, 2 },
+    { "UF other", K_UF19, 3 }, { NULL, K_S_NOSYNC, 0 }, { NULL, K_S_GARBLE, 0 },
+};
+const int nkrows = sizeof(krows) / sizeof(krows[0]);
+
+/* one counter of a table row, from per-kind counters (total, in-beam, sidelobe or a snapshot) */
+long krow_count(const struct krow *r, const long *by_kind, const long *commb_by_kind)
+{
+    switch (r->part) {
+    case 1: return by_kind[r->k] - commb_by_kind[r->k];        /* surveillance only: DF4/DF5 reply */
+    case 2: return commb_by_kind[r->k];                         /* Comm-B request */
+    case 3: return by_kind[K_UF19] + by_kind[K_UF24] + by_kind[K_UF_OTHER];
+    default: return by_kind[r->k];
+    }
+}
+
 const struct burst *analysis_graph_burst(void)
 {
     if (!AS.nhist) return NULL;
@@ -805,12 +826,12 @@ void analysis_print_summary(FILE *f)
     fprintf(f, "background (sidelobe) level %.1f dBFS, burst member >= %.1f dBFS, core >= %.1f dBFS\n\n",
             AS.bg_db, AS.bg_db + AS.cfg.member_db, AS.bg_db + AS.cfg.core_db);
     fprintf(f, "%-26s %9s %9s %9s\n", "Radar interrogations", "total", "in-beam", "sidelobe");
-    for (int k = 0; k < K_COUNT; k++) {
-        if (!AS.total[k]) continue;
-        fprintf(f, "%-26s %9ld %9ld %9ld\n", kind_label(k), AS.total[k], AS.inbeam[k], AS.side[k]);
-        if (AS.commb[k])
-            fprintf(f, "  %-24s %9ld %9ld %9ld\n", k == K_UF5 || k == K_UF21 ? "Comm-B req -> DF21" : "Comm-B req -> DF20",
-                    AS.commb[k], AS.commb_inbeam[k], AS.commb_side[k]);
+    for (int i = 0; i < nkrows; i++) {
+        const struct krow *r = &krows[i];
+        long tot = krow_count(r, AS.total, AS.commb);
+        if (tot)
+            fprintf(f, "%-26s %9ld %9ld %9ld\n", r->label ? r->label : kind_label(r->k), tot,
+                    krow_count(r, AS.inbeam, AS.commb_inbeam), krow_count(r, AS.side, AS.commb_side));
     }
     fprintf(f, "\nTCAS/ACAS (excluded): %ld  (UF0 %ld, UF16 %ld, whisper-shout %ld; %d aircraft)\n",
             AS.tcas_total, AS.tcas_uf0, AS.tcas_uf16, AS.tcas_ws, AS.naddr_tcas);
