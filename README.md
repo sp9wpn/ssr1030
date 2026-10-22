@@ -154,7 +154,8 @@ Below the status lines there are three columns:
 - **Interrogations:** per type, with total, in-beam, sidelobe and rate per minute (counted over the last 60 s). Mode S rows:
   - UF4 and UF5 count only plain surveillance roll-calls (answered with DF4/DF5).
   - `UF4  Comm-B req -> DF20` and `UF5  Comm-B req -> DF21` count the roll-calls that request a Comm-B register (RR ≥ 16), answered with DF20/DF21.
-  - UF11, UF20 and UF21 have their own rows. UF19, UF24 and unknown formats share `UF other`. TCAS (UF0/UF16) is counted on its own line.
+  - UF11 has its own row. UF19, UF20, UF21, UF24 and unknown formats share `UF other`. TCAS (UF0/UF16) is counted on its own line.
+  - Always shown when non-zero: A/C-only all-calls, UF4, UF5, UF11, the two Comm-B rows, `UF other` and Mode S no sync. Other types (Mode 1/2/A/B/C/D, A/C/S all-calls, other intermode) get their own row only from 2% of all interrogations; below that they add up in `other (< 2% each)`.
   - The summary printed at exit uses the same rows.
 - **Comm-B BDS:** per requested register, with register and shortcode (`4,0 selAlt`), total, in-beam, sidelobe and rate per minute.
 - **Radars:** one line each with bursts, rotation, dwell and interrogations per burst. UF11 codes, DI/PC and roll-called aircraft are in the exit summary.

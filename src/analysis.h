@@ -142,10 +142,16 @@ void burst_targets(const struct burst *b, const int *rank, char *out, size_t n);
 const struct burst *analysis_graph_burst(void);   /* latest burst of the main radar, else latest */
 
 /* rows of the interrogation table: Mode S UF4/UF5 split by the reply they ask for
-   (RR >= 16: Comm-B, DF20/DF21), rare uplink formats in one "UF other" row */
-struct krow { const char *label; int k, part; };
+   (RR >= 16: Comm-B, DF20/DF21), UF19/20/21/24 and unknown formats in one "UF other" row.
+   Rows not marked always are shown only from KROW_MIN_SHARE of all interrogations,
+   otherwise they add up in a final "other" row */
+#define KROW_MIN_SHARE 0.02
+#define KROW_OTHER "other (< 2% each)"
+struct krow { const char *label; int k, part; bool always; };
 extern const struct krow krows[];
 extern const int nkrows;
 long krow_count(const struct krow *r, const long *by_kind, const long *commb_by_kind);
+long krow_all(void);                                    /* all interrogations in the table */
+bool krow_shown(const struct krow *r, long tot, long all);
 
 #endif

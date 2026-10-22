@@ -475,13 +475,23 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     char left[24][80], mid[24][96], right[24][160];
     int nl = 0, nm = 0, nr = 0;
     snprintf(left[nl++], 80, B "%-24s %8s %7s %7s %6s" R, "Interrogation", "total", "in-beam", "sidelb", "/min");
-    for (int i = 0; i < nkrows && i < 64 && nl < 24; i++) {
+    long all = krow_all(), oth[3] = { 0 };
+    float oth_rate = 0;
+    for (int i = 0; i < nkrows && i < 64 && nl < 23; i++) {
         const struct krow *r = &krows[i];
-        long tot = krow_count(r, AS.total, AS.commb);
-        if (tot)
-            snprintf(left[nl++], 80, "%-24s %8ld %7ld %7ld %6.0f", r->label ? r->label : kind_label(r->k), tot,
-                     krow_count(r, AS.inbeam, AS.commb_inbeam), krow_count(r, AS.side, AS.commb_side), krate[i]);
+        long c[3] = { krow_count(r, AS.total, AS.commb), krow_count(r, AS.inbeam, AS.commb_inbeam),
+                      krow_count(r, AS.side, AS.commb_side) };
+        if (!c[0]) continue;
+        if (!krow_shown(r, c[0], all)) {
+            for (int j = 0; j < 3; j++) oth[j] += c[j];
+            oth_rate += krate[i];
+            continue;
+        }
+        snprintf(left[nl++], 80, "%-24s %8ld %7ld %7ld %6.0f", r->label ? r->label : kind_label(r->k),
+                 c[0], c[1], c[2], krate[i]);
     }
+    if (oth[0])
+        snprintf(left[nl++], 80, "%-24s %8ld %7ld %7ld %6.0f", KROW_OTHER, oth[0], oth[1], oth[2], oth_rate);
     if (nl == 1) snprintf(left[nl++], 80, DIM "(no radar interrogations yet)" R);
 
     snprintf(mid[nm++], 96, B "%-14s %7s %7s %6s %5s" R, "Comm-B BDS", "total", "in-beam", "sidelb", "/min");
