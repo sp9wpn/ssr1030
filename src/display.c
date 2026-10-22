@@ -24,6 +24,17 @@ static double last_now = -1;
 static float krate[64], bds_rate[256];   /* per minute, per krows row / BDS */
 
 /* spaces needed to pad s to w visible columns (escape sequences excluded) */
+/* interleaving table: highest shown percent (chance of b after a) first, then the more common first token */
+#define TR_MIN_SHARE 0.001            /* transitions out of a token, as a share of all interrogations, to be listed */
+struct ftrans { const struct trans *t; long from; int pct; };
+static int cmp_ftrans(const void *x, const void *y)
+{
+    const struct ftrans *p = x, *q = y;
+    if (p->pct != q->pct) return q->pct - p->pct;
+    if (p->from != q->from) return (q->from > p->from) - (q->from < p->from);
+    return (int)p->t->a - (int)q->t->a;
+}
+
 static int pad_to(const char *s, int w)
 {
     int vis = 0;
@@ -545,24 +556,34 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     if (AS.nhist > 0) {
         struct burst *b = &AS.hist[(AS.nhist - 1) % BURST_HIST];
         printf(B "Last burst #%d sequence" R DIM
-               "  (A C A/C-only all-call, AA CC plain A/C, S UF11 all-call, alt/sqk UF4/5, acid/selAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0, S-msg Comm-A, #N repeat)" R EL,
+               "  (A C A/C-only all-call, AA CC plain A/C, S UF11 all-call, alt/sqk UF4/5, acid/selAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0, S-msg Comm-A, xN repeat)" R EL,
                b->id);
         print_seq(b, cols, 4);
     } else fputs(EL EL EL, stdout);
 
     /* transitions */
-    printf(B "In-beam interleaving (most frequent transitions, dt avg [min-max] ms)" R EL);
-    struct trans top[8];
-    int nt = analysis_top_transitions(top, 8);
-    for (int i = 0; i < 8; i += 2) {
-        for (int j = i; j < i + 2; j++) {
+    printf(B "In-beam interleaving (%% = chance of this next after the first, highest first; dt [min-max] ms)" R EL);
+    static struct ftrans top[TR_N];
+    int nt = 0;
+    for (int i = 0; i < AS.ntr; i++) {
+        top[nt].t = &AS.tr[i];
+        top[nt].from = 0;                         /* all transitions out of the same token */
+        for (int k = 0; k < AS.ntr; k++) if (AS.tr[k].a == AS.tr[i].a) top[nt].from += AS.tr[k].n;
+        if (top[nt].from < TR_MIN_SHARE * all) continue;     /* too few to give a percent */
+        top[nt].pct = (int)lround(100.0 * AS.tr[i].n / top[nt].from);
+        nt++;
+    }
+    qsort(top, nt, sizeof(top[0]), cmp_ftrans);
+    for (int i = 0; i < 12; i += 3) {
+        for (int j = i; j < i + 3; j++) {
             if (j >= nt) continue;
-            /* fixed-width cell so the second column lines up */
+            const struct trans *t = top[j].t;
+            /* fixed-width cell so the columns line up */
             char ta[24], tb[24], cell[96];
-            snprintf(cell, sizeof(cell), "%-12s -> %-12s %6ld %8.3f [%7.3f -%8.3f]",
-                     seq_token_str(top[j].a, ta, sizeof(ta)), seq_token_str(top[j].b, tb, sizeof(tb)), top[j].n,
-                     1e3 * top[j].sum / top[j].n, 1e3 * top[j].min, 1e3 * top[j].max);
-            printf("  %-66s", cell);
+            snprintf(cell, sizeof(cell), "%-8s -> %-8s %4d%% [%7.3f -%8.3f]",
+                     seq_token_str(t->a, ta, sizeof(ta)), seq_token_str(t->b, tb, sizeof(tb)),
+                     top[j].pct, 1e3 * t->min, 1e3 * t->max);
+            printf("  %-46s", cell);
         }
         fputs(EL, stdout);
     }

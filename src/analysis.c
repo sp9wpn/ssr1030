@@ -677,7 +677,7 @@ int burst_item(const struct burst *b, int s, const int *rank, char *out, size_t 
     seq_token_str(b->ks[s], ts, sizeof(ts));
     if (b->ka[s] != NO_TARGET) snprintf(tg, sizeof(tg), "/%d", rank[b->ka[s]]);
     if (b->kans[s]) strcat(tg, "*");                /* answered on 1090 */
-    if (e - s > 1) snprintf(out, n, "%s%s#%d ", ts, tg, e - s);
+    if (e - s > 1) snprintf(out, n, "%s%sx%d ", ts, tg, e - s);
     else snprintf(out, n, "%s%s ", ts, tg);
     return e;
 }

@@ -279,7 +279,7 @@ They are left out of all radar analysis.
   - `msg`: Comm-A without a request.
   - `other`: UF24, UF19 and the rest.
 - **Interleaving:** the most frequent in-beam transitions, with Δt, plus the full token sequence of the last burst.
-  - Tokens (`#N` = repeated N times):
+  - Tokens (`xN` = repeated N times):
 
 | Token | Meaning |
 |---|---|
@@ -295,7 +295,7 @@ They are left out of all radar analysis.
 | `S-sls` | Mode S sidelobe (P5 ≥ P6) whose bits could not be recovered. Normally sidelobe Mode S is fully decoded and shown with its own token and the SLS flag |
 | `S-grb` | Mode S with no sync reversal and no P5 (garbled) |
 
-Roll-calls carry the number of their target, for example `alt/1` or `selAlt/2#2`.
+Roll-calls carry the number of their target, for example `alt/1` or `selAlt/2x2`.
 Targets are listed under the sequence, numbered in alphabetical order of their callsign or hex: `targets: 1/452124 2/DLH123`.
 
 The interleaving statistics use the same tokens, without the target numbers.
