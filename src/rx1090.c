@@ -1,5 +1,6 @@
-/* 1090 MHz replies from a second receiver (RTL-SDR running dump1090, read
- * from its Beast output), matched to the interrogations heard on 1030 MHz.
+/* 1090 MHz replies from a second receiver (any Beast source with its own 12 MHz
+ * sample timestamps, e.g. dump1090 or readsb with an SDR), matched to the
+ * interrogations heard on 1030 MHz.
  *
  * Time: a query has HackRF stream time t, a reply the dump1090 12 MHz
  * sample-clock timestamp r. A reply to that query arrives at

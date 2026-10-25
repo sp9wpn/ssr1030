@@ -440,7 +440,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     if (drops) printf("  " RED "USB drops %lu" R, (unsigned long)drops);
     fputs(EL, stdout);
     if (ri->agc && ri->live)
-        printf("  %s" R DIM "  auto gain keeps the main radar's beam peak near -6 dBFS (peak %.1f, clip %.4f%% over %.0f s)" R EL,
+        printf("  %s" R DIM "  auto gain keeps the strongest radar's beam peak near -6 dBFS (peak %.1f, clip %.4f%% over %.0f s)" R EL,
                clipping ? RED "clipping seen" : (weak ? YEL "weak" : GRN "level OK"), peak_w, clip_w_pct, win);
     else if (clipping)
         printf(RED B "  CLIPPING %.0f s ago" R RED " - lower gain: '-' VGA -2 dB, 'l' LNA -8 dB, 'p' amp off" R EL,
@@ -474,7 +474,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         struct rx1090_stats x;
         rx1090_get_stats(&x);
         printf("1090 replies: dump1090 %s ", x.peer);
-        if (!x.connected) printf(RED "not connected" R " (start: dump1090 --device-type rtlsdr --net)");
+        if (!x.connected) printf(RED "not connected" R " (start dump1090 or readsb with --net)");
         else {
             printf(GRN "connected" R " %.0f frames/s%s  ", x.rate, x.feeding ? "" : RED " (addresses not fed to port 30004)" R);
             if (!x.locked) printf(YEL "clock: searching" R DIM " (%s)" R, x.geo_on ? "needs replies from aircraft with ADS-B positions, in 2 scans or from 2 aircraft"

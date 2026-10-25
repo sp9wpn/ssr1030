@@ -159,8 +159,24 @@ static void set_gain(hackrf_device *dev, struct gain g, const char *why)
     }
 }
 
-/* called when a burst of the main radar was committed */
+/* called when any radar's burst was committed: the gain follows the strongest
+ * beam peak of all radars over the last AGC_SPAN s, each peak corrected to
+ * the current gain (a burst received before a gain change counts as it would
+ * be now) */
+#define AGC_SPAN 25.0                  /* s: two rotations of a slow (12 s) radar */
 static double last_clip_seen = -1e9;   /* no gain increase within 30 s of clipping */
+
+static float strongest_peak(double now)
+{
+    float m = -99;
+    int t = gain_total(cur_gain);
+    for (int i = AS.nhist - 1; i >= 0 && i >= AS.nhist - BURST_HIST; i--) {
+        const struct burst *h = &AS.hist[i % BURST_HIST];
+        if (h->t1 < now - AGC_SPAN) break;
+        if (!h->partial && h->peak + (t - h->gain) > m) m = h->peak + (t - h->gain);
+    }
+    return m;
+}
 
 static void agc_burst(hackrf_device *dev, const struct burst *b, struct demod *d)
 {
@@ -172,19 +188,20 @@ static void agc_burst(hackrf_device *dev, const struct burst *b, struct demod *d
     bool clip = ds && (double)dc / ds > 2e-6;
     if (clip) last_clip_seen = now_t;
     int t = gain_total(cur_gain);
+    float pk = strongest_peak(b->t1);
     char why[64];
-    if (b->peak > AGC_HIGH || clip) {
-        int step = (int)lroundf((b->peak - AGC_TARGET) / 2) * 2;
+    if (pk > AGC_HIGH || clip) {
+        int step = (int)lroundf((pk - AGC_TARGET) / 2) * 2;
         if (step < 2) step = clip ? 4 : 2;
         if (step > 16) step = 16;
-        snprintf(why, sizeof(why), "beam peak %.1f dBFS%s", b->peak, clip ? ", clipping" : "");
+        snprintf(why, sizeof(why), "beam peak %.1f dBFS%s", pk, clip ? ", clipping" : "");
         set_gain(dev, gain_from_total(t - step), why);
         agc_low_count = 0;
-    } else if (b->peak < AGC_LOW && now_t - last_clip_seen > 30) {
+    } else if (pk < AGC_LOW && now_t - last_clip_seen > 30) {
         if (++agc_low_count >= 2) {
-            int step = (int)lroundf((AGC_TARGET - b->peak) / 2) * 2;
+            int step = (int)lroundf((AGC_TARGET - pk) / 2) * 2;
             if (step > 12) step = 12;
-            snprintf(why, sizeof(why), "beam peak %.1f dBFS", b->peak);
+            snprintf(why, sizeof(why), "beam peak %.1f dBFS", pk);
             if (t < GAIN_MAX) set_gain(dev, gain_from_total(t + step), why);
             agc_low_count = 0;
         }
@@ -217,7 +234,7 @@ static void agc_clip_guard(hackrf_device *dev, struct demod *d)
     hot = 0;
 }
 
-/* no burst of the main radar for a while: raise gain while nothing is strong */
+/* no burst of any radar for a while: raise gain while nothing is strong */
 static void agc_idle(hackrf_device *dev, double since_burst, double rot)
 {
     static double last_idle;
@@ -548,7 +565,7 @@ static void usage(void)
 "  -l, --lna DB           LNA gain 0-40 step 8 (default 32)\n"
 "  -g, --vga DB           VGA gain 0-62 step 2 (default 24)\n"
 "  -a, --amp 0|1          RF amp +11 dB (default 0 = off); -a 1 for a distant radar\n"
-"      --no-auto-gain     fixed gain; by default the gain follows the main radar's beam peak\n"
+"      --no-auto-gain     fixed gain; by default the gain follows the strongest beam peak of all radars\n"
 "                         (target -6 dBFS, changed only between beam passes; 'g' toggles)\n"
 "      --serial SN        HackRF serial number\n"
 "  -t, --duration S       stop after S seconds\n\n"
@@ -564,7 +581,7 @@ static void usage(void)
 "                         addresses (48af01) or callsigns (LOT3KM; needs --adsb/--adsblol),\n"
 "                         separated by commas or spaces: -A 48af01,LOT3KM,DLH123\n"
 "                         Prefix with cs: to force a callsign that looks like hex\n\n"
-"1090 MHz replies (second receiver, e.g. RTL-SDR running dump1090):\n"
+"1090 MHz replies (second receiver with Beast output and 12 MHz timestamps, e.g. dump1090 or readsb):\n"
 "      --rx1090 HOST:PORT read dump1090's Beast output (port 30005, start dump1090 with --net);\n"
 "                         roll-called addresses are fed to its Beast input (port 30004)\n"
 "                         and mark answered queries with '*': roll-calls by aircraft address,\n"
@@ -865,11 +882,11 @@ int main(int argc, char **argv)
             now_t = now;
             if (live) {
                 static int seen_hist;
-                int code = analysis_main_code();
                 if (seen_hist > AS.nhist) seen_hist = AS.nhist;      /* statistics were reset */
                 while (seen_hist < AS.nhist) {
                     const struct burst *b = &AS.hist[seen_hist % BURST_HIST];
-                    if (code != -2 && b->code == code) { agc_burst(dev, b, d); last_main_burst = now; }
+                    agc_burst(dev, b, d);              /* every radar: the strongest beam sets the gain */
+                    last_main_burst = now;
                     int nrep = 0;
                     for (int k = 0; k < b->ngp; k++) nrep += b->gp[k].rep_n;
                     if (nrep && opt.beep) { fputs("\a", stdout); fflush(stdout); }

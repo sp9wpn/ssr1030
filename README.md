@@ -10,7 +10,7 @@ It is based on [dump1030](https://github.com/Fuziih/dump1030).
 - **Radar analysis:** main-beam bursts, rotation period, dwell time, interrogation sequence within the beam, several radars told apart by their codes.
 - **Sidelobe roll-calls:** Mode S heard through the radar's sidelobes, aimed at aircraft in other directions.
 - **Callsigns:** from short ADS-B windows on 1090 MHz, from [adsb.lol](https://adsb.lol), or from dump1090.
-- **Answered or not:** with a second receiver (RTL-SDR running dump1090), matches 1090 MHz replies to the interrogations, marks answered ones and decodes what the aircraft replied (altitude, squawk, BDS 2,0/4,0/5,0/6,0).
+- **Answered or not:** with a second 1090 MHz receiver that gives Beast output (for example dump1090 or readsb), matches 1090 MHz replies to the interrogations, marks answered ones and decodes what the aircraft replied (altitude, squawk, BDS 2,0/4,0/5,0/6,0).
 - **Live dashboard** with automatic gain, filters by radar, aircraft and interrogation type, and a burst chart. CSV log, IQ recording and replay.
 
 ![Dashboard](docs/dashboard.png)
@@ -73,7 +73,7 @@ Per-burst counts, sequences, dwell and rotation are computed only from interroga
 
 ## 1090 MHz replies (`--rx1090`)
 
-A second receiver on 1090 MHz shows which interrogations were answered. Run [dump1090-fa](https://github.com/flightaware/dump1090) on an RTL-SDR, then point ssr1030 at its Beast output:
+A second receiver on 1090 MHz shows which interrogations were answered. Any receiver works if it gives Beast binary output with its own 12 MHz sample timestamps: [dump1090-fa](https://github.com/flightaware/dump1090) or readsb with any SDR they support (RTL-SDR, bladeRF, a second HackRF, …), or a Mode-S Beast. The examples use dump1090-fa with an RTL-SDR; point ssr1030 at the Beast output (port 30005):
 
 ```
 dump1090 --device-type rtlsdr --net --net-ro-interval 0.05 --quiet
@@ -110,7 +110,7 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
 - **Sync from 1090 windows (default):** the HackRF briefly listens on 1090 MHz for 2 s (`--adsb-dwell`), placed right after a main-beam burst so no burst is lost. Its decoded ADS-B and DF11 frames carry HackRF sample times; dump1090 hears the same frames with its own sample times. Each identical frame (56 or 112 bits, good CRC) gives the clock offset directly.
   - The average of a window's frames sets the offset to ~0.1–0.3 µs rms; the change between windows is the drift (measured to ~0.01 ppm). Retuning the HackRF does not disturb its sample count, so the offset holds between windows.
   - It needs no replies, no positions and no radar: any ADS-B traffic heard by both radios works. Network delay does not matter, since both sides use sample times, so dump1090 may run on another computer.
-  - Interval: between windows the offset is extrapolated with the measured drift, and the error grows as the drift itself changes (the RTL-SDR warming up moved it from −0.9 to −0.4 ppm in 10 minutes: 2 µs of error after 30 s, 12 µs after 2.5 min). So windows come every 30 s at first; after two windows in a row within 5 µs of the tracked clock the interval doubles, up to 5 minutes. A window more than 15 µs off, a lock loss (USB sample drop, dump1090 restart) or a window with too few frames goes back to 30 s. The dashboard shows the current interval. With `-B` the windows keep the `-B` schedule (`--adsb-every`, for callsigns) and sync the clock too.
+  - Interval: between windows the offset is extrapolated with the measured drift, and the error grows as the drift itself changes (the receiver warming up, an RTL-SDR in the tests, moved it from −0.9 to −0.4 ppm in 10 minutes: 2 µs of error after 30 s, 12 µs after 2.5 min). So windows come every 30 s at first; after two windows in a row within 5 µs of the tracked clock the interval doubles, up to 5 minutes. A window more than 15 µs off, a lock loss (USB sample drop, dump1090 restart) or a window with too few frames goes back to 30 s. The dashboard shows the current interval. With `-B` the windows keep the `-B` schedule (`--adsb-every`, for callsigns) and sync the clock too.
   - Gain: during a window the HackRF uses its own gain (`--adsb-gain`, default 64 dB nominal). Automatic gain keeps the 1030 gain low when the radar is near, which leaves aircraft at 1090 in the noise; in tests decoding collapsed below 60 dB and fell again above about 75 dB.
   - A window needs 3 matching frames; with an antenna made for 1030 MHz the HackRF decodes only the stronger 1090 frames, which is why the windows are 2 s.
   - While windows keep coming, the methods below are off. After 5 minutes without a good window (no ADS-B traffic, or dump1090 timestamps missing) ssr1030 falls back to them. `--no-1090-sync` turns the windows off.
@@ -119,7 +119,7 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - Locking needs a few heard replies from roll-called aircraft within 60 s. With the 1090 antenna placed so that it hears few of the radar's targets, this can take a while.
   - The search looks only ±10 ms around the offset seen from the computer's clock (both streams are timestamped on arrival). The true offset has been within 1–2 ms of it in every test; the narrow search keeps chance agreements out.
   - With `--radar-pos`/`--rx-pos` (geometry lock), the predicted delays of 2 heard replies must agree within 30 µs, and they must come from 2 different scans or 2 different aircraft, or be at least 6 pairs (3 sources for the re-check to move an existing lock). In tests every false lock had exactly 2 pairs. A radar sends its roll-calls in pairs (UF4 + UF5) with fixed spacing, so replies to another radar's pair can agree by chance, but only within one scan for one aircraft. The delay histogram is then not used, because it is less reliable than waiting for this.
-  - Drift: the two clocks run a few ppm apart (crystal tolerance; an RTL-SDR with a TCXO, such as the Blog V4, is within 1 ppm). Each pair of matches more than 1 s apart corrects the drift (in small steps when they are close together, because each match carries a few µs of noise), and the learned drift is kept if the lock is lost. (The computer's clock is too jittery to measure the drift itself.)
+  - Drift: the two clocks run a few ppm apart (crystal tolerance; a receiver with a TCXO, such as the RTL-SDR Blog V4, is within 1 ppm). Each pair of matches more than 1 s apart corrects the drift (in small steps when they are close together, because each match carries a few µs of noise), and the learned drift is kept if the lock is lost. (The computer's clock is too jittery to measure the drift itself.)
   - Between rare matches the clock can wander, so the match window widens from 40 µs by 1 µs per second since the last match (up to 300 µs), and the first match after more than 30 s resets the offset.
   - Re-check: while locked, the geometry search runs every 5 s on the last minute of pairs. If no reply in that minute fits the tracked clock and another offset passes the stricter rule, ssr1030 re-locks there.
 - **No `*` does not mean no reply.** The second receiver hears only some replies (antenna placement, range), so an unmarked query may have been answered.
@@ -199,7 +199,7 @@ The three columns need about 150 terminal columns. Below them come the burst tab
 ## Gain
 
 **Automatic gain is on by default** (`--no-auto-gain` turns it off, `g` toggles it).
-- **Target:** the beam peak of the main radar (`-r`, or the radar with the most bursts) is kept near −6 dBFS.
+- **Target:** the strongest beam peak of all radars heard in the last 25 s is kept near −6 dBFS, whatever `-r` selects, so a strong radar never clips while a weaker one is analysed. Peaks received before a gain change are corrected to the current gain.
   - Peak ≥ −2 dBFS, or clipping: the gain goes down at once.
   - Clipping from any source in 2 consecutive 1 s windows: the gain goes down 4 dB. This happens only between beam passes, at most every 2 s.
   - The gain is never raised within 30 s of clipping, so it doesn't swing up and down.
