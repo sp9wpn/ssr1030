@@ -373,11 +373,7 @@ void reply_describe(const struct rx1090_rec *r, char *buf, size_t n)
     const uint8_t *m = r->msg;
     int o = 0;
     switch (r->df) {
-    case 11: {
-        const char *cs = cs_lookup(getbits(m, 9, 32));
-        o = snprintf(buf, n, "%06x%s%s", getbits(m, 9, 32), cs ? " " : "", cs ? cs : "");
-        break;
-    }
+    case 11: o = snprintf(buf, n, "%06x", getbits(m, 9, 32)); break;   /* only what the reply carries */
     case 4: case 20: o = alt13(getbits(m, 20, 32), buf, n); break;
     case 5: case 21: o = snprintf(buf, n, "squawk %04x", abcd13(getbits(m, 20, 32))); break;
     default: o = snprintf(buf, n, "DF%d", r->df);

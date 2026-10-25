@@ -96,7 +96,7 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
 - **No `*` does not mean no reply.** The second receiver hears only some replies (antenna placement, range), so an unmarked query may have been answered.
 - **Delay:** queries pass to the analysis only after their replies could have arrived, so the dashboard runs about 0.1–0.6 s behind. `--net-ro-interval 0.05` keeps dump1090's part of that small (its default is 0.5 s).
 - **Replies in the burst chart (`b`):** each matched reply gets a row under its query: DF, delay after the query, residual against the position-based prediction, and the decoded content.
-  - DF4/20: altitude. DF5/21: squawk. DF11: the replying aircraft (one row each).
+  - DF4/20: altitude. DF5/21: squawk. DF11: the replying aircraft's address (one row each).
   - DF20/21: also the register the query asked for: BDS 2,0 callsign; 4,0 selected altitude (MCP/FMS) and QNH; 5,0 roll, track, ground speed, turn rate, TAS; 6,0 heading, IAS, Mach, vertical rates.
   - The header shows `replies N`.
   ```
