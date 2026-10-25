@@ -170,7 +170,9 @@ void adsb_frame(const uint8_t *msg, int nbits);   /* decoded 1090 frame from els
 bool df17_position(const uint8_t *msg, double ref_lat, double ref_lon, double *lat, double *lon, double *alt_m);
 void geo_ecef(double lat, double lon, double alt_m, double xyz[3]);
 double geo_dist(const double a[3], const double b[3]);
-int geo_parse(const char *s, double *lat, double *lon, double *alt_m);   /* "LAT,LON[,ALT_M]", -1 on error */
+#define POSITIONS_FILE "positions.csv"   /* NAME,LAT,LON[,ALT_M]: names for --radar-pos / --rx-pos */
+int geo_parse(const char *s, double *lat, double *lon, double *alt_m);   /* "LAT,LON[,ALT_M]" or a name from
+                                     POSITIONS_FILE (current directory, then the program's): -1 bad, -2 unknown name */
 
 /* ---- rx1090.c ---- */
 struct rx1090_rec {         /* a reply matched to a query, kept for display */

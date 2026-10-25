@@ -1,7 +1,12 @@
 /* Aircraft positions from ADS-B (DF17 airborne position, CPR local decoding
  * against a reference point) and the radar -> aircraft -> receiver path
  * geometry used to predict reply delays. */
+#include <ctype.h>
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include <strings.h>
+#include <unistd.h>
 #include "ssr1030.h"
 
 #define NZ      15
@@ -65,10 +70,49 @@ double geo_dist(const double a[3], const double b[3])
     return sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
 }
 
-int geo_parse(const char *s, double *lat, double *lon, double *alt_m)
+static int geo_numbers(const char *s, double *lat, double *lon, double *alt_m)
 {
     *alt_m = 0;
     int n = sscanf(s, "%lf,%lf,%lf", lat, lon, alt_m);
     if (n < 2 || fabs(*lat) > 90 || fabs(*lon) > 180) return -1;
     return 0;
+}
+
+/* NAME,LAT,LON[,ALT_M] lines; '#' comments and lines whose LAT is not a number (a header) are skipped */
+static int geo_lookup(const char *path, const char *name, double *lat, double *lon, double *alt_m)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    char line[256];
+    int rc = -1;
+    while (rc < 0 && fgets(line, sizeof(line), f)) {
+        char *c = strchr(line, ',');
+        if (line[0] == '#' || !c) continue;
+        *c = 0;
+        char *nm = line;
+        while (isspace((unsigned char)*nm)) nm++;
+        for (char *e = nm + strlen(nm); e > nm && isspace((unsigned char)e[-1]); ) *--e = 0;
+        if (!strcasecmp(nm, name) && !geo_numbers(c + 1, lat, lon, alt_m)) rc = 0;
+    }
+    fclose(f);
+    return rc;
+}
+
+int geo_parse(const char *s, double *lat, double *lon, double *alt_m)
+{
+    if (!geo_numbers(s, lat, lon, alt_m)) return 0;
+    if (strchr(s, ',')) return -1;                          /* numbers, but bad ones */
+    if (!geo_lookup(POSITIONS_FILE, s, lat, lon, alt_m)) return 0;
+    /* also next to the program, so it works from any directory */
+    char exe[512];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n > 0) {
+        exe[n] = 0;
+        char *sl = strrchr(exe, '/');
+        if (sl && (size_t)(sl + 1 - exe) + sizeof(POSITIONS_FILE) <= sizeof(exe)) {
+            strcpy(sl + 1, POSITIONS_FILE);
+            if (!geo_lookup(exe, s, lat, lon, alt_m)) return 0;
+        }
+    }
+    return -2;
 }

@@ -8,3 +8,6 @@ captures/
 *.csv
 *.cs16
 callsigns*.txt
+
+# private site positions for --radar-pos / --rx-pos names
+positions.csv

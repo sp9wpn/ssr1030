@@ -80,6 +80,21 @@ dump1090 --device-type rtlsdr --net --net-ro-interval 0.05 --quiet
 ./ssr1030 --rx1090 localhost:30005
 ```
 
+With the radar and antenna positions, the clock locks from ADS-B positions (see **Clock** below):
+
+```
+./ssr1030 --rx1090 localhost:30005 --radar-pos 52.1000,21.0000,150 --rx-pos 52.0900,21.0100,120
+./ssr1030 --rx1090 localhost:30005 --radar-pos RADAR --rx-pos HOME
+```
+
+The names come from `positions.csv` (in the current directory, else next to the program). It is in `.gitignore`, so your positions stay out of the repository. One `NAME,LAT,LON[,ALT_M]` line per site, in decimal degrees and metres; lines starting with `#` are skipped, and names are not case-sensitive:
+
+```
+# name,lat,lon,alt_m
+RADAR,52.1000,21.0000,150
+HOME,52.0900,21.0100,120
+```
+
 Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acquisition or DF17) it has not heard in the last minute. ssr1030 therefore sends every roll-called address to dump1090's Beast input (port 30004, same host) as a DF11 acquisition squitter every 20 s. dump1090 then accepts that aircraft's replies. These announced aircraft also appear in dump1090's own aircraft list.
 
 - **Marking:** an answered query gets `*`:
