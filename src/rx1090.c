@@ -78,6 +78,7 @@ struct acd {
     double delay, t, announced;     /* learned delay (no position), when, last announced to dump1090 */
     bool pos;                       /* ADS-B position: ECEF, receiver time of the fix */
     double ecef[3], pos_r;
+    double h, h_t;                  /* height above the radar (reply or ADS-B altitude), when */
     bool used;
 };
 struct minage { double cur, prev, t; };     /* minimum over the last 30-60 s */
@@ -105,6 +106,7 @@ static double last_r = -1, last_rx_wall, t_stream;
 static bool locked, lock_geo;
 static bool geo_on;
 static double g_radar[3], g_rx[3], g_d0, g_ref_lat, g_ref_lon;
+static double g_ralt, g_up[3], g_xh, g_xz;  /* radar altitude; antenna in the radar's frame: horizontal, up */
 static double res[RES_N];
 static struct rx1090_rec recs[REC_N];
 static uint64_t nrec;
@@ -291,6 +293,12 @@ void rx1090_set_geometry(double rlat, double rlon, double ralt, double xlat, dou
     geo_ecef(rlat, rlon, ralt, g_radar);
     geo_ecef(xlat, xlon, xalt, g_rx);
     g_d0 = geo_dist(g_radar, g_rx);
+    double la = rlat * M_PI / 180, lo = rlon * M_PI / 180, v[3];
+    g_up[0] = cos(la) * cos(lo); g_up[1] = cos(la) * sin(lo); g_up[2] = sin(la);
+    for (int i = 0; i < 3; i++) v[i] = g_rx[i] - g_radar[i];
+    g_xz = v[0] * g_up[0] + v[1] * g_up[1] + v[2] * g_up[2];
+    g_xh = sqrt(g_d0 * g_d0 - g_xz * g_xz);
+    g_ralt = ralt;
     g_ref_lat = xlat;
     g_ref_lon = xlon;
     geo_on = true;
@@ -563,6 +571,7 @@ void rx1090_poll(double t_now)
             if (a && geo_dist(e, g_rx) < 400e3) {
                 if (!a->pos) S.npos++;
                 memcpy(a->ecef, e, sizeof(e)); a->pos = true; a->pos_r = r;
+                a->h = alt - g_ralt; a->h_t = r;
             }
         }
         struct reply y = { .r = r, .df = (uint8_t)df, .code = -1, .addr = NO_ADDR_RX, .len = w->len };
@@ -630,7 +639,49 @@ static void keep(struct interrog *x, const struct reply *y, double d, float res_
     k->delay_us = (float)(d * 1e6);
     k->res_us = res_us;
     k->req_bds = req;
+    k->excess_m = lock_geo ? (float)((d - TURNAROUND) * C_LIGHT) : NAN;
+    k->h_m = k->adsb_m = NAN;
+    struct acd *a = ac_get(y->df == 11 ? y->addr : x->addr, false);
+    int ft = reply_alt_ft(y->msg, y->df);
+    if (ft != INT32_MIN) {
+        k->h_m = (float)(ft * 0.3048 - g_ralt);
+        if (a) { a->h = k->h_m; a->h_t = y->r; }
+    } else if (a && a->h_t > 0 && fabs(y->r - a->h_t) < AC_AGE) k->h_m = (float)a->h;
+    if (a && geo_on && a->pos && fabs(y->r - a->pos_r) <= POS_AGE) k->adsb_m = (float)geo_dist(g_radar, a->ecef);
     if (x->rep_n < 255) x->rep_n++;
+}
+
+/* Radar->aircraft range from the reply's path excess and the antenna angle az
+ * (from the radar->antenna direction; its sign does not matter). Radar frame:
+ * x towards the antenna, z up; the aircraft at ground range g sits at height
+ * h - g^2/2R on the curved earth. Solve |A| + |A - X| = |X| + excess for g:
+ * near the radar->antenna line there can be two solutions. */
+int rx1090_range(const struct rx1090_rec *r, double az, double out_m[2])
+{
+    if (!geo_on || isnan(r->excess_m)) return 0;
+    double h = isnan(r->h_m) ? 0 : r->h_m, k = g_d0 + r->excess_m, c = cos(az), sn = sin(az);
+    int n = 0;
+#define RANGE_F(g, f) do { double ax = (g) * c, ay = (g) * sn, z = h - (g) * (g) / (2 * 6371e3); \
+        f = sqrt(ax * ax + ay * ay + z * z) + sqrt((ax - g_xh) * (ax - g_xh) + ay * ay + (z - g_xz) * (z - g_xz)) - k; } while (0)
+    double g0 = 0, f0;
+    RANGE_F(g0, f0);
+    for (double g1 = 200; g1 <= 600e3 && n < 2; g1 += 200) {
+        double f1;
+        RANGE_F(g1, f1);
+        if ((f0 < 0) != (f1 < 0)) {
+            double lo = g0, hi = g1, flo = f0;
+            for (int i = 0; i < 30; i++) {
+                double m = 0.5 * (lo + hi), fm;
+                RANGE_F(m, fm);
+                if ((fm < 0) == (flo < 0)) { lo = m; flo = fm; } else hi = m;
+            }
+            double g = 0.5 * (lo + hi), z = h - g * g / (2 * 6371e3);
+            out_m[n++] = sqrt(g * g + z * z);
+        }
+        g0 = g1; f0 = f1;
+    }
+#undef RANGE_F
+    return n;
 }
 
 const struct rx1090_rec *rx1090_rec_get(uint64_t idx)

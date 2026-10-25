@@ -101,10 +101,15 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - The header shows `replies N`.
   ```
       +22.78 ms     +1.69°  alt          RYR48SC*      -16.4 ███████████████████████
-                            ↳ DF4   131.6 µs  res +0.1  alt 8950 ft
+                            ↳ DF4   131.6 µs  res +0.1  2.2 or 5.8 NM (ADS-B 2.3 NM)  alt 8950 ft
       +34.33 ms     +2.53°  sqk          RYR48SC*      -16.9 ██████████████████████
-                            ↳ DF5   131.4 µs  res -0.1  squawk 6162
+                            ↳ DF5   131.4 µs  res -0.1  2.4 or 5.6 NM (ADS-B 2.3 NM)  squawk 6162
   ```
+- **Range:** with `--radar-pos`/`--rx-pos` and a position-based lock, each reply row also shows the estimated radar→aircraft distance in NM.
+  - The reply delay gives the path radar → aircraft → antenna. The query's antenna angle from the beam middle gives the aircraft's direction from the radar, and its altitude (from this reply or a recent one, or from ADS-B) gives its height. Together they fix the distance.
+  - Near the radar→antenna line two distances fit; both are shown (`2.2 or 5.8 NM`). There a 1 µs timing error moves the estimate by kilometres, while elsewhere it moves it by about 150 m.
+  - With no altitude known, the aircraft is assumed to be at the radar's height.
+  - When dump1090 has a recent ADS-B position, its distance follows in brackets, for comparison (`(ADS-B 2.3 NM)`).
 - **Autofreeze (`F`):** arms a one-shot freeze. The first burst with a matched reply freezes the screen and opens it in the burst chart; `space` returns to live. The status line shows `AUTOFREEZE` while armed. Without `--rx1090`, `F` only shows a hint.
 - **Beep (`--beep`):** rings the terminal bell once for every burst with at least one matched reply, with or without autofreeze. This includes the burst that triggers autofreeze.
 - **Callsigns:** DF17 identification and Comm-B BDS 2,0 from dump1090 fill the callsign table, so `-B` is not needed (and is ignored).

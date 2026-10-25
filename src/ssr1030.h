@@ -178,9 +178,15 @@ struct rx1090_rec {         /* a reply matched to a query, kept for display */
     uint8_t msg[14];
     float delay_us, res_us; /* res_us NAN without a position */
     int req_bds;            /* register the query asked for (BDS1*16+BDS2), -1 none */
+    float excess_m;         /* radar->aircraft->antenna minus radar->antenna, NAN without a position lock */
+    float h_m;              /* aircraft height above the radar (reply or recent altitude), NAN unknown */
+    float adsb_m;           /* radar->aircraft from a recent ADS-B position, NAN none */
 };
 const struct rx1090_rec *rx1090_rec_get(uint64_t idx);   /* NULL once overwritten */
 void reply_describe(const struct rx1090_rec *r, char *buf, size_t n);   /* modes.c: decoded content */
+int reply_alt_ft(const uint8_t *msg, int df);            /* modes.c: DF4/20 altitude, INT32_MIN none */
+int rx1090_range(const struct rx1090_rec *r, double az, double out_m[2]);   /* radar->aircraft for antenna
+                            angle az (rad) from the antenna direction: 0-2 solutions */
 struct rx1090_stats {
     bool connected, locked;
     bool feeding;           /* roll-called addresses are announced to dump1090 */

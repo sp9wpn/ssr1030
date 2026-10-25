@@ -299,13 +299,26 @@ static int gillham(unsigned a)
     return (int)(f * 5 + h) - 13;
 }
 
+/* 13-bit altitude code (AC13) -> feet, INT32_MIN if absent, metric or invalid */
+static int ac13_ft(unsigned v)
+{
+    if (!v || (v & 0x40)) return INT32_MIN;
+    if (v & 0x10) return (int)(((v & 0x1F80) >> 2 | (v & 0x20) >> 1 | (v & 0x0F)) * 25) - 1000;
+    int h = gillham(abcd13(v));
+    return h == INT32_MIN ? INT32_MIN : h * 100;
+}
+
 static int alt13(unsigned v, char *buf, size_t n)
 {
     if (!v) return snprintf(buf, n, "alt -");
     if (v & 0x40) return snprintf(buf, n, "alt (metric)");
-    if (v & 0x10) return snprintf(buf, n, "alt %d ft", (int)(((v & 0x1F80) >> 2 | (v & 0x20) >> 1 | (v & 0x0F)) * 25) - 1000);
-    int h = gillham(abcd13(v));
-    return h == INT32_MIN ? snprintf(buf, n, "alt ?") : snprintf(buf, n, "alt %d ft", h * 100);
+    int ft = ac13_ft(v);
+    return ft == INT32_MIN ? snprintf(buf, n, "alt ?") : snprintf(buf, n, "alt %d ft", ft);
+}
+
+int reply_alt_ft(const uint8_t *msg, int df)
+{
+    return df == 4 || df == 20 ? ac13_ft(getbits(msg, 20, 32)) : INT32_MIN;
 }
 
 /* signed field with a separate sign bit before it */

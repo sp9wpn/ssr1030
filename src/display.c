@@ -285,10 +285,18 @@ static void draw_graph(int cols, int rows)
             char line[320], c[200];
             if (!r) { snprintf(line, sizeof(line), "%26s" DIM "\u21b3 (reply no longer stored)" R, ""); }
             else {
-                char res[24] = "";
+                char res[24] = "", rng[64] = "";
                 if (!isnan(r->res_us)) snprintf(res, sizeof(res), "  res %+.1f", r->res_us);
+                /* range from the reply delay and the antenna angle at the query */
+                double rm[2];
+                int nr = rot > 0 ? rx1090_range(r, 2 * M_PI * (g->t - mid) / rot, rm) : 0;
+                int o = 0;
+                for (int q = 0; q < nr; q++)
+                    o += snprintf(rng + o, sizeof(rng) - o, "%s%.1f", q ? " or " : "  ", rm[q] / 1852);
+                if (nr) o += snprintf(rng + o, sizeof(rng) - o, " NM");
+                if (!isnan(r->adsb_m)) snprintf(rng + o, sizeof(rng) - o, "%s(ADS-B %.1f NM)", nr ? " " : "  ", r->adsb_m / 1852);
                 reply_describe(r, c, sizeof(c));
-                snprintf(line, sizeof(line), "%26s" CYN "\u21b3 DF%-2d %6.1f \u00b5s%s  %s" R, "", r->df, r->delay_us, res, c);
+                snprintf(line, sizeof(line), "%26s" CYN "\u21b3 DF%-2d %6.1f \u00b5s%s%s  %s" R, "", r->df, r->delay_us, res, rng, c);
             }
             put_cut(line, cols - 1);
             fputs(EL, stdout);
