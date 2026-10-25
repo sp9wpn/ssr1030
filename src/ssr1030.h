@@ -191,6 +191,7 @@ struct rx1090_stats {
     bool connected, locked;
     bool feeding;           /* roll-called addresses are announced to dump1090 */
     bool geo;               /* locked from aircraft positions */
+    bool geo_on;            /* radar and receiver positions given */
     double res_rms_us;      /* rms of measured - predicted delay, last 64 matches */
     long nres;
     long npos;              /* aircraft with an ADS-B position */
@@ -198,6 +199,7 @@ struct rx1090_stats {
     double rate;            /* frames/s over the last few seconds */
     double off_ms, drift_ppm;
     long locks;             /* times the clock lock was found */
+    long relocks;           /* times the geometry re-check moved the lock */
     long rc, rc_ans;        /* roll-calls checked / answered (since lock) */
     long ac, ac_ans;        /* UF11 all-calls checked / answered */
     char peer[128];

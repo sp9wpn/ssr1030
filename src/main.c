@@ -962,10 +962,10 @@ int main(int argc, char **argv)
     if (opt.rx1090) {
         struct rx1090_stats x;
         rx1090_get_stats(&x);
-        fprintf(sf, "1090 replies (dump1090 %s): %ld frames, %ld aircraft with position, clock lock found %ld times%s%s; "
-                    "answered: roll-call %ld/%ld, UF11 %ld/%ld (since the last lock)",
+        fprintf(sf, "1090 replies (dump1090 %s): %ld frames, %ld aircraft with position, clock lock found %ld times%s%s, "
+                    "moved by the re-check %ld times, drift %+.2f ppm; answered: roll-call %ld/%ld, UF11 %ld/%ld (since the last lock)",
                 x.peer, x.frames, x.npos, x.locks, x.locked ? "" : ", not locked at the end",
-                x.locked && x.geo ? " (from positions)" : "", x.rc_ans, x.rc, x.ac_ans, x.ac);
+                x.locked && x.geo ? " (from positions)" : "", x.relocks, x.drift_ppm, x.rc_ans, x.rc, x.ac_ans, x.ac);
         if (x.geo && x.nres) fprintf(sf, "; residual rms %.1f us over %ld matches", x.res_rms_us, x.nres);
         fputc('\n', sf);
     }

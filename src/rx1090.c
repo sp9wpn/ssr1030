@@ -8,12 +8,20 @@
  * delay is the 128 us Mode S turnaround plus the extra path
  * radar -> aircraft -> receiver minus radar -> receiver (0 to ~3.5 ms).
  *  - coarse: both streams are stamped with the host clock on arrival; the
- *    smallest (wall - stream time) of each gives off to ~0.1 s
+ *    smallest (wall - stream time) of each gives off to a few ms (seen: true
+ *    offset 1-2 ms above it); locks search only +-LOCK_SPAN around it
  *  - lock: roll-calls and replies with the same address over 60 s; at the
  *    true offset they all fall within a few ms, so the 4 ms window holding
  *    the most pairs wins
  *  - track: an aircraft's delay barely changes between scans, so the
  *    residual of each re-matched aircraft follows the clock drift
+ *  - drift: learned from matches more than 1 s apart and kept across lock
+ *    losses (the host-clock minima jitter too much to measure it).
+ *    Between rare matches the match window widens with the time since the
+ *    last one, and the first match after a long gap resets the offset
+ *  - re-check: while locked on positions, the geometry search runs again on
+ *    the last minute of pairs; when nothing fits the tracked clock and
+ *    another offset is clear, it re-locks there
  * Roll-calls (UF4/5/20/21) match by address, UF11 by the II/SI code in the
  * DF11 reply. Mode A/C replies carry neither and are not matched.
  * The second receiver usually hears only some of the replies (antenna
@@ -46,9 +54,9 @@
 #define WIN_HI      0.0040
 #define AC_TOL      0.00025         /* known aircraft: delay within this of last time */
 #define AC_AGE      60.0            /* s: a known delay is trusted this long */
-#define LOCK_SPAN   0.6             /* lock search: coarse offset +- this, s */
+#define LOCK_SPAN   0.01            /* lock search: coarse offset +- this, s (true offset seen 1-2 ms off) */
 #define LOCK_BIN    0.00005
-#define LOCK_NB     24000           /* 2 * LOCK_SPAN / LOCK_BIN */
+#define LOCK_NB     400             /* 2 * LOCK_SPAN / LOCK_BIN */
 #define LOCK_W      80              /* 4 ms window */
 #define LOCK_HIST   60.0            /* s of roll-calls used for a lock (few replies are heard) */
 #define LOCK_MIN    4               /* pairs needed */
@@ -61,9 +69,16 @@
                                        give the lock are still marked: it comes ~6 s after the first of its 2 scans */
 #define BEAST_IN    "30004"
 #define GEO_BIN     0.00001         /* geometry lock: 10 us bins */
-#define GEO_NB      120000          /* 2 * LOCK_SPAN / GEO_BIN */
+#define GEO_NB      2000            /* 2 * LOCK_SPAN / GEO_BIN */
 #define GEO_W       3               /* true pairs agree within 30 us */
 #define GEO_TOL     0.00004         /* match: reply within this of the predicted time */
+#define TOL_GROW    1e-6            /* ... plus this per s since the last match (drift error) */
+#define TOL_MAX     0.0003
+#define RECHECK     5.0             /* s between geometry re-checks while locked */
+#define SCAN_GAP    0.5             /* s: pairs further apart than this come from different scans */
+#define INDEP_MIN   2               /* a geometry lock needs agreement from this many scans or aircraft, */
+#define INDEP_MOVE  3               /* a re-check moving an established lock this many */
+#define PAIRS_ONE   6               /* ... or this many agreeing pairs from one source (false ones seen: 2) */
 #define POS_AGE     10.0            /* s: a position is used this long (250 m/s -> ~8 us) */
 #define TURNAROUND  128e-6          /* Mode S reply delay after the sync phase reversal */
 #define C_LIGHT     299792458.0
@@ -112,7 +127,7 @@ static struct rx1090_rec recs[REC_N];
 static uint64_t nrec;
 static long nres;
 static double c_off, c_k, c_t0;             /* off(t) = c_off + c_k (t - c_t0) */
-static double last_try;
+static double last_try, last_check, last_match; /* last lock try, geometry re-check, clock update */
 static int misfits;                         /* heard-but-unfitting roll-calls in a row */
 static struct rx1090_stats S;
 static FILE *rlog;                          /* RX1090_LOG: every reply, clock data */
@@ -132,6 +147,11 @@ static void minage_put(struct minage *m, double v, double wall)
     if (v < m->cur) m->cur = v;
 }
 static double minage_get(const struct minage *m) { return m->cur < m->prev ? m->cur : m->prev; }
+
+static bool k_learned;                      /* c_k came from matches: keep it across lock losses */
+
+/* drift a new lock starts from */
+static double first_drift(void) { return k_learned ? c_k : 0; }
 
 /* ---------------- reader thread: Beast binary frames ---------------- */
 
@@ -269,8 +289,8 @@ int rx1090_start(const char *hostport)
     snprintf(S.peer, sizeof(S.peer), "%s:%s", host, port);
     const char *lp = getenv("RX1090_LOG");
     if (lp && (rlog = fopen(lp, "w")))
-        fprintf(rlog, "# R r_s df addr code hex | C t_stream hw_off rw_off (wall - stream time minima) | "
-                      "L t_stream offset drift (r = t + offset + delay)\n");
+        fprintf(rlog, "# R r_s df addr code hex | C t_stream hw_off rw_off (wall - stream time minima) drift_ppm "
+                      "offset | L t_stream offset kind drift_ppm (r = t + offset + delay)\n");
     quit = false;
     if (pthread_create(&thr, NULL, reader, NULL)) return -1;
     thr_on = true;
@@ -305,6 +325,13 @@ void rx1090_set_geometry(double rlat, double rlon, double ralt, double xlat, dou
 }
 
 static double off_at(double t) { return c_off + c_k * (t - c_t0); }
+
+/* match window around the predicted reply: wider the longer no match corrected the clock */
+static double geo_tol(double t)
+{
+    double w = GEO_TOL + TOL_GROW * fabs(t - last_match);
+    return w < TOL_MAX ? w : TOL_MAX;
+}
 
 static struct acd *ac_get(uint32_t a, bool create)
 {
@@ -412,11 +439,11 @@ static void try_lock(double t_now)
             unlock();
             locked = true;
             c_off = omin - 0.000128;        /* nearest-path aircraft: delay ~ turnaround only */
-            c_k = 0;
+            c_k = first_drift();
             c_t0 = t_now;
             misfits = 0;
             S.locks++;
-            if (rlog) fprintf(rlog, "L %.3f %.7f 0\n", t_now, c_off);
+            if (rlog) fprintf(rlog, "L %.3f %.7f hist %.3f\n", t_now, c_off, 1e6 * c_k);
             S.rc = S.rc_ans = S.ac = S.ac_ans = 0;
             if (getenv("RX1090_DEBUG")) {
                 fprintf(stderr, "rx1090 LOCKED at t=%.1f: offset %.6f s; pairs in the window (query t, addr, delay us):\n",
@@ -436,19 +463,38 @@ static void try_lock(double t_now)
     }
 }
 
-/* geometry lock: off = r - t - predicted delay for every pair whose aircraft
- * has a position; true pairs agree within ~10 us, cross pairs (other queries
- * to the same aircraft) are hundreds of us away */
-static bool try_lock_geo(double t_now)
+/* number of scans among query times: a radar pairs roll-calls (UF4 + UF5) at a
+ * fixed spacing, so replies to another radar's pair to the same aircraft can
+ * agree by chance within one scan; agreement across scans or aircraft cannot */
+static int count_scans(double *ts, int n)
 {
+    for (int i = 1; i < n; i++)
+        for (int j = i; j > 0 && ts[j] < ts[j - 1]; j--) { double x = ts[j]; ts[j] = ts[j - 1]; ts[j - 1] = x; }
+    int c = n > 0;
+    for (int i = 1; i < n; i++) if (ts[i] - ts[i - 1] > SCAN_GAP) c++;
+    return c;
+}
+
+/* geometry lock: off = r - t - predicted delay for every pair whose aircraft
+ * has a position, over the last LOCK_HIST s, each carried to t_now with the
+ * drift k0; true pairs agree within ~10 us, cross pairs (other queries to the
+ * same aircraft) are hundreds of us away. The winning 30 us window needs
+ * INDEP_MIN independent sources (scans, plus aircraft beyond the first); a
+ * first lock also takes PAIRS_ONE pairs from one source. recheck (already
+ * locked on positions): re-locks only when no pair fits the tracked clock and
+ * another offset has INDEP_MOVE sources */
+static bool try_lock_geo(double t_now, bool recheck)
+{
+    double k0 = recheck ? c_k : first_drift();
     static int hist[GEO_NB + GEO_W];
     double hwo = minage_get(&hw), rwo = minage_get(&rw);
     if (hwo > 1e299 || rwo > 1e299 || !qh_n) return false;
     double oc = hwo - rwo, base = oc - LOCK_SPAN;
     memset(hist, 0, sizeof(hist));
     uint64_t q0 = qh_n > QH_N ? qh_n - QH_N : 0;
-    int npairs = 0, best = 0, nsum = 0;
-    double sum = 0;
+    int npairs = 0, best = 0, nsum = 0, ncur = 0, nwin = 0;
+    double sum = 0, twin[256];
+    uint32_t awin[256];
     for (int pass = 0; pass < 2; pass++) {
         for (uint64_t i = q0; i < qh_n; i++) {
             const struct qrec *q = &qh[i % QH_N];
@@ -458,12 +504,15 @@ static bool try_lock_geo(double t_now)
                 if (y->r > q->t + oc + LOCK_SPAN) break;
                 double d;
                 if (!pair_ok(q, y) || !predict(ac_get(y->addr, false), y->r, &d)) continue;
-                double o = y->r - q->t - d;
+                double o = y->r - q->t - d + k0 * (t_now - q->t);
                 int b = (int)((o - base) / GEO_BIN);
                 if (b < 0 || b >= GEO_NB) continue;
-                if (pass == 0) { hist[b]++; npairs++; }
-                else if (b >= best && b < best + GEO_W) {
+                if (pass == 0) {
+                    hist[b]++; npairs++;
+                    if (recheck && fabs(y->r - q->t - d - off_at(q->t)) < geo_tol(q->t)) ncur++;   /* fits the tracked clock */
+                } else if (b >= best && b < best + GEO_W) {
                     sum += o; nsum++;
+                    if (nwin < 256) { awin[nwin] = y->addr; twin[nwin++] = q->t; }
                     if (getenv("RX1090_DEBUG"))
                         fprintf(stderr, "  %.4f %-5s %06x DF%d delay %.1f us (predicted)\n", q->t, kind_name(q->kind),
                                 y->addr, y->df, 1e6 * d);
@@ -488,19 +537,34 @@ static bool try_lock_geo(double t_now)
             fprintf(stderr, "rx1090 geo lock: t=%.1f pairs with position %d, best 30 us window %d, best other %d\n",
                     t_now, npairs, c1, c2);
         if (c1 < 2 || c1 < 2 * c2) return false;
-        if (getenv("RX1090_DEBUG")) fprintf(stderr, "rx1090 GEO LOCKED at t=%.1f, pairs:\n", t_now);
+        if (recheck && (ncur || fabs(base + (best + 0.5 * GEO_W) * GEO_BIN - off_at(t_now)) < GEO_TOL)) return false;
     }
+    int scans = count_scans(twin, nwin), nac = 0;
+    for (int i = 0; i < nwin; i++) {
+        int j = 0;
+        while (j < i && awin[j] != awin[i]) j++;
+        nac += j == i;
+    }
+    bool indep = scans + nac - 1 >= (recheck ? INDEP_MOVE : INDEP_MIN) || (!recheck && nsum >= PAIRS_ONE);
+    if (getenv("RX1090_DEBUG"))
+        fprintf(stderr, "rx1090 geo window: %d pairs from %d scans, %d aircraft, %+.3f ms from coarse%s\n", nsum, scans, nac,
+                1e3 * (sum / nsum - oc), indep ? "" : " (too few)");
+    if (!indep) return false;
+    if (getenv("RX1090_DEBUG")) fprintf(stderr, "rx1090 GEO %s at t=%.1f\n", recheck ? "RE-LOCKED" : "LOCKED", t_now);
     unlock();
+    if (recheck) S.relocks++;
     locked = lock_geo = true;
     c_off = sum / nsum;
-    c_k = 0;
-    c_t0 = t_now;
+    c_k = k0;
+    c_t0 = last_match = t_now;
     misfits = 0;
     nres = 0;
-    S.locks++;
-    S.rc = S.rc_ans = S.ac = S.ac_ans = 0;
-    if (rlog) fprintf(rlog, "L %.3f %.7f geo\n", t_now, c_off);
-    if (getenv("RX1090_DEBUG")) fprintf(stderr, "rx1090 offset %.7f s from %d pairs\n", c_off, nsum);
+    if (!recheck) {
+        S.locks++;
+        S.rc = S.rc_ans = S.ac = S.ac_ans = 0;
+    }
+    if (rlog) fprintf(rlog, "L %.3f %.7f %s %.3f\n", t_now, c_off, recheck ? "regeo" : "geo", 1e6 * c_k);
+    if (getenv("RX1090_DEBUG")) fprintf(stderr, "rx1090 offset %.7f s from %d pairs, drift %+.2f ppm\n", c_off, nsum, 1e6 * c_k);
     return true;
 }
 
@@ -594,7 +658,8 @@ void rx1090_poll(double t_now)
     static double last_c;
     if (rlog && t_now - last_c >= 10) {
         last_c = t_now;
-        fprintf(rlog, "C %.3f %.6f %.6f\n", t_now, minage_get(&hw), minage_get(&rw));
+        fprintf(rlog, "C %.3f %.6f %.6f %.3f %.7f\n", t_now, minage_get(&hw), minage_get(&rw),
+                locked ? 1e6 * c_k : NAN, locked ? off_at(t_now) : NAN);
         fflush(rlog);
     }
 
@@ -607,7 +672,12 @@ void rx1090_poll(double t_now)
     if (locked && misfits >= UNLOCK_N) unlock();
     if (t_now - last_try > 1.0 && (!locked || (geo_on && !lock_geo))) {
         last_try = t_now;
-        if (!(geo_on && try_lock_geo(t_now)) && !locked) try_lock(t_now);
+        if (geo_on) try_lock_geo(t_now, false);   /* positions known: the histogram lock only adds false matches */
+        else if (!locked) try_lock(t_now);
+    }
+    if (lock_geo && t_now - last_check > RECHECK) {
+        last_check = t_now;
+        try_lock_geo(t_now, true);
     }
 }
 
@@ -622,8 +692,9 @@ bool rx1090_ready(double t)
 static void clock_update(double t, double e)
 {
     double dt = t - c_t0;
-    c_off = off_at(t) + 0.3 * e;
-    if (dt > 1.0) c_k += 0.3 * e / dt;
+    c_off = off_at(t) + (dt > 30 ? 1.0 : 0.3) * e;     /* after a long gap the drift error dominates */
+    if (dt > 1.0) { c_k += (dt < 60 ? dt / 200 : 0.3) * e / dt; k_learned |= lock_geo; }   /* close matches: small steps, noise */
+    last_match = t;
     if (c_k > 1e-4) c_k = 1e-4;
     if (c_k < -1e-4) c_k = -1e-4;
     c_t0 = t;
@@ -715,6 +786,7 @@ void rx1090_match(struct interrog *x)
         struct acd *a = ac_get(x->addr, false);
         double pd = 0;
         bool geo = lock_geo && predict(a, x->t + off, &pd);
+        double tol = geo_tol(x->t);
         bool known = a && x->t - a->t < AC_AGE;
         /* with a position: the reply at the predicted delay, nothing else.
          * Known aircraft: the reply at its usual delay; otherwise (or when
@@ -730,7 +802,7 @@ void rx1090_match(struct interrog *x)
             if (!first) { first = y; fd = d; }
             ncand++;
             if (geo) {
-                if (fabs(d - pd) < GEO_TOL && (!best || fabs(d - pd) < fabs(bd - pd))) { best = y; bd = d; }
+                if (fabs(d - pd) < tol && (!best || fabs(d - pd) < fabs(bd - pd))) { best = y; bd = d; }
             } else if (known && fabs(d - a->delay) < AC_TOL && (!best || fabs(d - a->delay) < fabs(bd - a->delay))) { best = y; bd = d; }
         }
         if (geo) {
@@ -764,7 +836,7 @@ void rx1090_match(struct interrog *x)
             bool pos = lock_geo && predict(ac_get(y->addr, false), y->r, &pd);
             /* II/SI codes are reused by distant radars: with a position, only a
              * reply at the predicted time answers this radar's all-call */
-            if (pos && fabs(d - pd) >= GEO_TOL) continue;
+            if (pos && fabs(d - pd) >= geo_tol(x->t)) continue;
             y->used = true;
             if (!x->nreplies || d * 1e6 < x->reply_us) x->reply_us = (float)(d * 1e6);
             if (pos) {
@@ -784,6 +856,7 @@ void rx1090_get_stats(struct rx1090_stats *s)
     S.connected = connected;
     S.feeding = feeding;
     S.locked = locked;
+    S.geo_on = geo_on;
     S.off_ms = locked ? 1e3 * off_at(c_t0) : 0;
     S.drift_ppm = locked ? 1e6 * c_k : 0;
     S.geo = lock_geo;

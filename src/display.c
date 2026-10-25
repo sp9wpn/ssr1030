@@ -477,7 +477,8 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         if (!x.connected) printf(RED "not connected" R " (start: dump1090 --device-type rtlsdr --net)");
         else {
             printf(GRN "connected" R " %.0f frames/s%s  ", x.rate, x.feeding ? "" : RED " (addresses not fed to port 30004)" R);
-            if (!x.locked) printf(YEL "clock: searching" R DIM " (needs roll-calls answered by known aircraft)" R);
+            if (!x.locked) printf(YEL "clock: searching" R DIM " (%s)" R, x.geo_on ? "needs replies from aircraft with ADS-B positions, in 2 scans or from 2 aircraft"
+                                                                                 : "needs roll-calls answered by known aircraft");
             else {
                 printf(GRN "clock locked" R " (%s) drift %+.1f ppm", x.geo ? "positions" : "delay histogram", x.drift_ppm);
                 if (x.geo && x.nres) printf("  residual rms %.1f us", x.res_rms_us);
