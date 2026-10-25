@@ -181,6 +181,16 @@ double analysis_rotation(void)
     return median_d(best->periods, best->np < 64 ? best->np : 64);
 }
 
+double analysis_rotation_of(const char *key)
+{
+    for (int r = 0; r < AS.nradars; r++) {
+        struct radar *X = &AS.radars[r];
+        if (strcmp(X->key, key) || X->np == 0) continue;
+        return median_d(X->periods, X->np < 64 ? X->np : 64);
+    }
+    return 0;
+}
+
 double analysis_last_burst_end(void) { return AS.last_burst_end; }
 
 int analysis_main_code(void)

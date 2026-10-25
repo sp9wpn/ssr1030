@@ -100,10 +100,10 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - DF20/21: also the register the query asked for: BDS 2,0 callsign; 4,0 selected altitude (MCP/FMS) and QNH; 5,0 roll, track, ground speed, turn rate, TAS; 6,0 heading, IAS, Mach, vertical rates.
   - The header shows `replies N`.
   ```
-       22.78 ms  alt          RYR48SC*      -16.4 ███████████████████████
-                 ↳ DF4   131.6 µs  res +0.1  alt 8950 ft
-       34.33 ms  sqk          RYR48SC*      -16.9 ██████████████████████
-                 ↳ DF5   131.4 µs  res -0.1  squawk 6162
+      +22.78 ms     +1.69°  alt          RYR48SC*      -16.4 ███████████████████████
+                            ↳ DF4   131.6 µs  res +0.1  alt 8950 ft
+      +34.33 ms     +2.53°  sqk          RYR48SC*      -16.9 ██████████████████████
+                            ↳ DF5   131.4 µs  res -0.1  squawk 6162
   ```
 - **Autofreeze (`F`):** arms a one-shot freeze. The first burst with a matched reply freezes the screen and opens it in the burst chart; `space` returns to live. The status line shows `AUTOFREEZE` while armed. Without `--rx1090`, `F` only shows a hint.
 - **Beep (`--beep`):** rings the terminal bell once for every burst with at least one matched reply, with or without autofreeze. This includes the burst that triggers autofreeze.
@@ -230,14 +230,14 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 `b` switches the whole screen to the latest beam pass of the main radar, one row per query in time order:
 
 ```
-   -262.58 ms  AA                     -18.5 ░░░░░░░           P2
-    -36.42 ms  selAlt       4a2182     -9.1 ████████████P5█████████████████
-    -23.35 ms  A                        1.2 ██P2█████████████████████████████████████████████████████
-    +47.23 ms  AA                     -20.1 ▒▒▒
+   -262.58 ms    -19.50°  AA                     -18.5 ░░░░░░░           P2
+    -36.42 ms     -2.70°  selAlt       4a2182     -9.1 ████████████P5█████████████████
+    -23.35 ms     -1.73°  A                        1.2 ██P2█████████████████████████████████████████████████████
+    +47.23 ms     +3.51°  AA                     -20.1 ▒▒▒
 ```
 
 - **Scale:** fixed, from −40 dBFS (just below the noise floor) to +3 dBFS (where I/Q clipping starts), so bar lengths compare between bursts. The header shows the gain each burst was received with.
-- **Each row:** time relative to the middle of the beam pass, amplitude = P6 for Mode S and P1 for A/C, query token (12 characters), target (8 characters: callsign when known, else hex address), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
+- **Each row:** time relative to the middle of the beam pass, antenna angle from the beam middle (from the radar's rotation period, shown in the header; `-` while it is unknown), amplitude = P6 for Mode S and P1 for A/C, query token (12 characters), target (8 characters: callsign when known, else hex address), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
 - **Bar character:**
   - `█` in-beam query
   - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)

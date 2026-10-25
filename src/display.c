@@ -180,6 +180,7 @@ static void draw_graph(int cols, int rows)
         return;
     }
     double mid = 0.5 * (b->t0 + b->t1);
+    double rot = analysis_rotation_of(b->key);     /* for the angle from the beam middle */
     int n = b->ngp, first_beam = 0;
     float amax = -99, amin = 99;
     for (int i = n - 1; i >= 0; i--) {
@@ -223,11 +224,12 @@ static void draw_graph(int cols, int rows)
 
     {
         char hdr[256];
-        char rp[24] = "";
+        char rp[24] = "", rt[32] = "";
         if (nrep) snprintf(rp, sizeof(rp), "  " CYN "replies %d" R, nrep);
-        snprintf(hdr, sizeof(hdr), B "Burst #%d %s%s" R "  dur %.1f ms  peak %.1f dBFS  gain %.0f dB  beam %d  sidelobe %d  weak %d%s"
+        if (rot > 0) snprintf(rt, sizeof(rt), "  rotation %.3f s", rot);
+        snprintf(hdr, sizeof(hdr), B "Burst #%d %s%s" R "  dur %.1f ms%s  peak %.1f dBFS  gain %.0f dB  beam %d  sidelobe %d  weak %d%s"
                  DIM "  rows %d-%d/%d  bars %.0f..%+.0f dBFS" R,
-                 b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), b->peak, b->gain, b->n, b->nside,
+                 b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), rt, b->peak, b->gain, b->n, b->nside,
                  b->nweak, rp, g_scroll + 1, last, n, GRAPH_BOT_DBFS, GRAPH_TOP_DBFS);
         put_cut(hdr, cols - 1);
         fputs(EL, stdout);
@@ -235,7 +237,8 @@ static void draw_graph(int cols, int rows)
 
     /* bar width: screen minus the row prefix, 5 columns spare */
     char probe[96];
-    int plen = snprintf(probe, sizeof(probe), "%+10.2f ms  %-12.12s %-8.8s%s %-3s %6.1f ", -9999.99, "", "", " ", "", -99.9);
+    int plen = snprintf(probe, sizeof(probe), "%+10.2f ms  %+8.2fd  %-12.12s %-8.8s%s %-3s %6.1f ",
+                        -9999.99, -999.99, "", "", " ", "", -99.9);
     int W = cols - plen - 5;
     if (W < 10) W = 10;
     for (int i = g_scroll; i < last; i++) {
@@ -259,8 +262,10 @@ static void draw_graph(int cols, int rows)
         }
         /* fixed-width fields: query 12 (longest token, e.g. S-msg/hdgSpd), target 8 (callsign or hex),
          * "*" when it was answered on 1090, "sls" when the query reached us through a sidelobe */
-        printf("%s%+10.2f ms  %-12.12s %-8.8s%s %-3s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), ts, tg,
-               g->ans ? "*" : " ", g->cls == GP_SIDE ? "sls" : "", g->amp);
+        char deg[16] = "       -  ";      /* antenna angle from the beam middle, from the rotation */
+        if (rot > 0) snprintf(deg, sizeof(deg), "%+8.2f\u00b0 ", 360.0 * (g->t - mid) / rot);
+        printf("%s%+10.2f ms  %s %-12.12s %-8.8s%s %-3s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), deg,
+               ts, tg, g->ans ? "*" : " ", g->cls == GP_SIDE ? "sls" : "", g->amp);
         fputs(R, stdout);
         int end = mpos > len ? mpos : len;
         for (int k = 0; k < end; k++) {
@@ -278,12 +283,12 @@ static void draw_graph(int cols, int rows)
         for (int k = 0; k < g->rep_n; k++) {
             const struct rx1090_rec *r = rx1090_rec_get(g->rep_idx + k);
             char line[320], c[200];
-            if (!r) { snprintf(line, sizeof(line), "%15s" DIM "\u21b3 (reply no longer stored)" R, ""); }
+            if (!r) { snprintf(line, sizeof(line), "%26s" DIM "\u21b3 (reply no longer stored)" R, ""); }
             else {
                 char res[24] = "";
                 if (!isnan(r->res_us)) snprintf(res, sizeof(res), "  res %+.1f", r->res_us);
                 reply_describe(r, c, sizeof(c));
-                snprintf(line, sizeof(line), "%15s" CYN "\u21b3 DF%-2d %6.1f \u00b5s%s  %s" R, "", r->df, r->delay_us, res, c);
+                snprintf(line, sizeof(line), "%26s" CYN "\u21b3 DF%-2d %6.1f \u00b5s%s  %s" R, "", r->df, r->delay_us, res, c);
             }
             put_cut(line, cols - 1);
             fputs(EL, stdout);

@@ -138,6 +138,7 @@ void analysis_tick(double now);
 void analysis_print_summary(FILE *f);
 void analysis_gap(double t0, double t1);    /* no 1030 data between t0 and t1 (ADS-B window) */
 double analysis_rotation(void);             /* rotation of the selected / busiest radar, 0 unknown */
+double analysis_rotation_of(const char *key);  /* rotation of radar "SI17", "?" ..., 0 unknown */
 double analysis_last_burst_end(void);       /* stream time of last committed burst end, -1 none */
 int analysis_main_code(void);               /* selected radar, else the one with most bursts; -2 none */
 void analysis_gain_shift(float delta_db);   /* receiver gain changed: shift background levels */
