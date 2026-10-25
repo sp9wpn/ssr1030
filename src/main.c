@@ -568,10 +568,11 @@ static void usage(void)
 "                         and mark answered queries with '*': roll-calls by aircraft address,\n"
 "                         UF11 by the II/SI code in DF11; also supplies callsigns. Mode A/C\n"
 "                         replies are not matched. Live HackRF only\n"
-"      --radar-pos LAT,LON[,ALT_M]  radar position and\n"
-"      --rx-pos LAT,LON[,ALT_M]     1090 antenna position: the reply delay is then predicted from\n"
+"      --radar-pos LAT,LON[,ALT_M]|NAME  radar position and\n"
+"      --rx-pos LAT,LON[,ALT_M]|NAME     1090 antenna position: the reply delay is then predicted from\n"
 "                         each aircraft's ADS-B position, which locks the clock from 2 replies\n"
-"                         and matches replies to within 40 us\n"
+"                         and matches replies to within 40 us. NAME: a line NAME,LAT,LON[,ALT_M]\n"
+"                         in positions.csv (current directory, then next to the program)\n"
 "      --beep             ring the terminal bell on every burst with matched replies\n"
 "                         (once per burst; also when autofreeze, key F, triggers)\n\n"
 "ADS-B callsigns (1090 MHz, HackRF retunes for short windows):\n"
@@ -737,8 +738,14 @@ int main(int argc, char **argv)
         analysis_set_rx(rx1090_ready, rx1090_match);
         if (opt.radar_pos && opt.rx_pos) {
             double rl, ro, ra, xl, xo, xa;
-            if (geo_parse(opt.radar_pos, &rl, &ro, &ra) < 0 || geo_parse(opt.rx_pos, &xl, &xo, &xa) < 0) {
-                fprintf(stderr, "--radar-pos / --rx-pos: use LAT,LON[,ALT_M] in decimal degrees\n");
+            const char *bad = NULL;
+            int e = geo_parse(opt.radar_pos, &rl, &ro, &ra);
+            if (e < 0) bad = opt.radar_pos;
+            else if ((e = geo_parse(opt.rx_pos, &xl, &xo, &xa)) < 0) bad = opt.rx_pos;
+            if (bad) {
+                if (e == -2) fprintf(stderr, "--radar-pos / --rx-pos: '%s' is not in " POSITIONS_FILE "\n", bad);
+                else fprintf(stderr, "--radar-pos / --rx-pos: use LAT,LON[,ALT_M] in decimal degrees or a name from "
+                                     POSITIONS_FILE "\n");
                 return 1;
             }
             rx1090_set_geometry(rl, ro, ra, xl, xo, xa);
