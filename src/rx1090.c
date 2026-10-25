@@ -27,6 +27,18 @@
  * The second receiver usually hears only some of the replies (antenna
  * placement), so an unheard reply never counts against the lock; only
  * replies from the aircraft that do not fit the expected delay do.
+ * Sync from 1090 windows (the best clock, used whenever it works): the HackRF
+ * briefly listens on 1090 MHz (ADS-B windows) and its decoded frames carry
+ * HackRF stream times. dump1090 hears the same frames; an identical frame
+ * (56/112 bits, CRC good) within SYNC_SPAN of the coarse offset gives
+ * off = r - t_preamble + SYNC_REF directly (dump1090 stamps preamble + 64 us;
+ * a reply's preamble starts 128 us after the sync reversal, 4.75 us after P1).
+ * The median of a window locks the clock to ~0.5 us, consecutive windows give
+ * the drift, and network delay does not matter. Between windows the offset is
+ * extrapolated; the error grows as the drift itself changes (warm-up), so the
+ * window interval starts at SYNC_IV_MIN and doubles while windows agree with
+ * the tracked clock. Matching, lock searches and
+ * clock updates from replies stay off while these windows keep coming.
  * With the radar and receiver positions known (--radar-pos, --rx-pos), the
  * extra path comes from the aircraft's ADS-B position, so every heard reply
  * gives the offset itself (to ~10 us): the geometry lock. Without
@@ -79,6 +91,17 @@
 #define INDEP_MIN   2               /* a geometry lock needs agreement from this many scans or aircraft, */
 #define INDEP_MOVE  3               /* a re-check moving an established lock this many */
 #define PAIRS_ONE   6               /* ... or this many agreeing pairs from one source (false ones seen: 2) */
+#define SYNC_N      8192            /* dump1090 frames kept for the window sync */
+#define HQ_N        4096            /* HackRF window frames waiting for their dump1090 copy */
+#define SYNC_SPAN   0.25            /* s: identical frame searched this far from the coarse offset */
+#define SYNC_REF    4.75e-6         /* offset = r - t_preamble + this (see the top) */
+#define SYNC_MIN    3               /* matched frames needed in a window */
+#define SYNC_AGREE  3e-6            /* frames within this of the window median count */
+#define SYNC_IV_MIN 30.0            /* s between sync windows while starting or unsure, */
+#define SYNC_IV_MAX 300.0           /* doubling up to this while windows agree with the tracked clock */
+#define SYNC_GOOD   5e-6            /* a window this close to the tracked clock is good, */
+#define SYNC_BAD    15e-6           /* this far off: back to SYNC_IV_MIN */
+#define SYNC_STALE  (SYNC_IV_MAX + 120) /* s without a window: back to locking from replies */
 #define POS_AGE     10.0            /* s: a position is used this long (250 m/s -> ~8 us) */
 #define TURNAROUND  128e-6          /* Mode S reply delay after the sync phase reversal */
 #define C_LIGHT     299792458.0
@@ -118,7 +141,18 @@ static uint64_t qh_n;
 static struct acd act[AC_N];
 static struct minage hw = { 1e300, 1e300, 0 }, rw = { 1e300, 1e300, 0 };
 static double last_r = -1, last_rx_wall, t_stream;
-static bool locked, lock_geo;
+static bool locked, lock_geo, lock_frames;
+struct sframe { double r; uint8_t len, msg[14]; };      /* dump1090 frame for the window sync */
+static struct sframe sf[SYNC_N];
+static uint64_t sf_n;
+struct hframe { double t; uint8_t len, msg[14]; };      /* HackRF window frame */
+static struct hframe hq[HQ_N];
+static uint64_t hq_r, hq_w;
+static double wo[HQ_N], wt[HQ_N];                       /* current window: offsets, HackRF times */
+static int wn;
+static double sync_o, sync_t = -1e300;                  /* last window: offset at time */
+static double sync_iv = SYNC_IV_MIN;                    /* wanted time between windows */
+static int sync_good;                                   /* good windows in a row */
 static bool geo_on;
 static double g_radar[3], g_rx[3], g_d0, g_ref_lat, g_ref_lon;
 static double g_ralt, g_up[3], g_xh, g_xz;  /* radar altitude; antenna in the radar's frame: horizontal, up */
@@ -329,6 +363,7 @@ static double off_at(double t) { return c_off + c_k * (t - c_t0); }
 /* match window around the predicted reply: wider the longer no match corrected the clock */
 static double geo_tol(double t)
 {
+    if (lock_frames) return GEO_TOL;         /* clock from 1090 windows: only the position age counts */
     double w = GEO_TOL + TOL_GROW * fabs(t - last_match);
     return w < TOL_MAX ? w : TOL_MAX;
 }
@@ -388,7 +423,7 @@ static bool pair_ok(const struct qrec *q, const struct reply *y)
 
 static void unlock(void)
 {
-    locked = lock_geo = false;
+    locked = lock_geo = lock_frames = false;
     for (int k = 0; k < AC_N; k++) act[k].t = -1e300;     /* forget delays, keep announce times */
 }
 
@@ -599,6 +634,118 @@ void rx1090_note_query(const struct interrog *it)
     }
 }
 
+/* ---------------- sync from 1090 windows ---------------- */
+
+void rx1090_hframe(const uint8_t *msg, int nbits, double t)
+{
+    if (hq_w - hq_r >= HQ_N) hq_r++;
+    struct hframe *h = &hq[hq_w++ % HQ_N];
+    h->t = t; h->len = (uint8_t)(nbits / 8);
+    memcpy(h->msg, msg, h->len);
+}
+
+static uint64_t sf_first_at(double r)
+{
+    uint64_t lo = sf_n > SYNC_N ? sf_n - SYNC_N : 0, hi = sf_n;
+    while (lo < hi) {
+        uint64_t m = lo + (hi - lo) / 2;
+        if (sf[m % SYNC_N].r < r) lo = m + 1; else hi = m;
+    }
+    return lo;
+}
+
+static int cmp_d(const void *a, const void *b)
+{
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+}
+
+/* a window's frames are in: lock or update the clock from their median */
+static void sync_window(double t_now)
+{
+    int n = wn;
+    wn = 0;
+    if (n < SYNC_MIN) {
+        if (getenv("RX1090_DEBUG")) fprintf(stderr, "rx1090 sync: window with %d matched frames, need %d\n", n, SYNC_MIN);
+        return;
+    }
+    double so[HQ_N];
+    memcpy(so, wo, n * sizeof(double));
+    qsort(so, n, sizeof(double), cmp_d);
+    double med = so[n / 2], sum = 0, st = 0, dev = 0;
+    int k = 0;
+    for (int i = 0; i < n; i++)
+        if (fabs(wo[i] - med) < SYNC_AGREE) { sum += wo[i]; st += wt[i]; k++; }
+    if (k < SYNC_MIN) return;
+    double o = sum / k, t = st / k;
+    for (int i = 0; i < n; i++) if (fabs(wo[i] - med) < SYNC_AGREE) dev += (wo[i] - o) * (wo[i] - o);
+    double jump = locked ? o - off_at(t) : NAN;
+    if (!lock_frames || isnan(jump) || fabs(jump) > SYNC_BAD) { sync_iv = SYNC_IV_MIN; sync_good = 0; }
+    else if (fabs(jump) < SYNC_GOOD && ++sync_good >= 2 && sync_iv < SYNC_IV_MAX) {
+        sync_iv = 2 * sync_iv < SYNC_IV_MAX ? 2 * sync_iv : SYNC_IV_MAX;
+    }
+    if (!lock_frames) {
+        double k0 = first_drift();
+        unlock();
+        locked = lock_frames = true;
+        lock_geo = geo_on;
+        c_k = k0;
+        misfits = 0;
+        nres = 0;
+        S.locks++;
+        S.rc = S.rc_ans = S.ac = S.ac_ans = 0;
+    } else if (t - sync_t > 5) {
+        c_k = (o - sync_o) / (t - sync_t);    /* ~0.2 us over 30 s: 0.01 ppm, no smoothing needed */
+        if (c_k > 1e-4) c_k = 1e-4;
+        if (c_k < -1e-4) c_k = -1e-4;
+        k_learned = true;
+    }
+    c_off = o;
+    c_t0 = last_match = t;
+    sync_o = o; sync_t = t;
+    S.sync_windows++;
+    S.sync_n = k;
+    S.sync_rms_us = 1e6 * sqrt(dev / k);
+    S.sync_jump_us = 1e6 * jump;
+    S.sync_iv = sync_iv;
+    if (rlog) fprintf(rlog, "S %.3f %.7f %d %.2f %.2f %.4f %.0f\n", t, o, k, S.sync_rms_us, S.sync_jump_us, 1e6 * c_k, sync_iv);
+    if (getenv("RX1090_DEBUG"))
+        fprintf(stderr, "rx1090 sync: t=%.1f %d of %d frames, offset %.7f s, rms %.2f us, vs tracked %+.2f us, drift %+.3f ppm, "
+                "next in %.0f s\n", t, k, n, o, S.sync_rms_us, S.sync_jump_us, 1e6 * c_k, sync_iv);
+    (void)t_now;
+}
+
+/* HackRF window frames whose dump1090 copy has had time to arrive */
+static void sync_poll(double t_now)
+{
+    double hwo = minage_get(&hw), rwo = minage_get(&rw);
+    if (hwo > 1e299 || rwo > 1e299) return;
+    double oc = hwo - rwo;
+    while (hq_r < hq_w) {
+        struct hframe *h = &hq[hq_r % HQ_N];
+        if (last_r - oc < h->t + SYNC_SPAN && t_now - h->t < 30) break;   /* dump1090 not past it yet */
+        hq_r++;
+        if (wn && h->t - wt[wn - 1] > 5) sync_window(t_now);           /* a new window began */
+        int same = 0;
+        double r = 0;
+        for (uint64_t j = sf_first_at(h->t + oc - SYNC_SPAN); j < sf_n; j++) {
+            const struct sframe *f = &sf[j % SYNC_N];
+            if (f->r > h->t + oc + SYNC_SPAN) break;
+            if (f->len == h->len && !memcmp(f->msg, h->msg, h->len)) { same++; r = f->r; }
+        }
+        if (same == 1 && wn < HQ_N) { wo[wn] = r - h->t + SYNC_REF; wt[wn++] = h->t; }
+    }
+    if (wn && t_now - wt[wn - 1] > 5 && hq_r == hq_w) sync_window(t_now);
+}
+
+/* time the next sync window should follow the last one; a window that is
+ * overdue (it found too few frames) is retried soon */
+double rx1090_sync_interval(double t_now)
+{
+    if (!lock_frames || t_now - sync_t > sync_iv + 45) return SYNC_IV_MIN;
+    return sync_iv;
+}
+
 void rx1090_poll(double t_now)
 {
     t_stream = t_now;
@@ -638,6 +785,11 @@ void rx1090_poll(double t_now)
                 a->h = alt - g_ralt; a->h_t = r;
             }
         }
+        if (((df == 17 || df == 18) && nbits == 112 && !syn) || (df == 11 && nbits == 56 && !(syn & ~0x7Fu))) {
+            struct sframe *f = &sf[sf_n++ % SYNC_N];
+            f->r = r; f->len = w->len;
+            memcpy(f->msg, w->msg, w->len);
+        }
         struct reply y = { .r = r, .df = (uint8_t)df, .code = -1, .addr = NO_ADDR_RX, .len = w->len };
         memcpy(y.msg, w->msg, w->len);
         if (df == 11 && nbits == 56) {
@@ -669,6 +821,12 @@ void rx1090_poll(double t_now)
         rate_t0 = wall;
         rate_n0 = S.frames;
     }
+    sync_poll(t_now);
+    if (lock_frames && t_now - sync_t > SYNC_STALE) {
+        lock_frames = false;                /* windows stopped: lock from replies again */
+        if (getenv("RX1090_DEBUG")) fprintf(stderr, "rx1090 sync: no 1090 window for %.0f s\n", SYNC_STALE);
+    }
+    if (lock_frames) return;
     if (locked && misfits >= UNLOCK_N) unlock();
     if (t_now - last_try > 1.0 && (!locked || (geo_on && !lock_geo))) {
         last_try = t_now;
@@ -691,6 +849,7 @@ bool rx1090_ready(double t)
 
 static void clock_update(double t, double e)
 {
+    if (lock_frames) return;                 /* the 1090 windows are far more precise */
     double dt = t - c_t0;
     c_off = off_at(t) + (dt > 30 ? 1.0 : 0.3) * e;     /* after a long gap the drift error dominates */
     if (dt > 1.0) { c_k += (dt < 60 ? dt / 200 : 0.3) * e / dt; k_learned |= lock_geo; }   /* close matches: small steps, noise */
@@ -799,6 +958,7 @@ void rx1090_match(struct interrog *x)
             if (y->r > hi) break;
             if (y->used || y->addr != x->addr || !df_fits(x->kind, y->df)) continue;
             double d = y->r - x->t - off;
+            if (lock_frames && d < TURNAROUND - 5e-6) continue;     /* exact clock: nothing before the turnaround */
             if (!first) { first = y; fd = d; }
             ncand++;
             if (geo) {
@@ -857,6 +1017,7 @@ void rx1090_get_stats(struct rx1090_stats *s)
     S.feeding = feeding;
     S.locked = locked;
     S.geo_on = geo_on;
+    S.frames_lock = lock_frames;
     S.off_ms = locked ? 1e3 * off_at(c_t0) : 0;
     S.drift_ppm = locked ? 1e6 * c_k : 0;
     S.geo = lock_geo;

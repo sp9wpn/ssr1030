@@ -29,10 +29,11 @@ static struct {
     int dens_max;
     const char *file, *record, *log, *serial, *adsb_db, *rx1090, *radar_pos, *rx_pos;
     char sep;
-    bool list, dashboard, quiet, show_tcas, beep;
+    bool list, dashboard, quiet, show_tcas, beep, no_sync, dwell_set, adsb_cs;   /* adsb_cs: -B given */
     double duration;
     bool adsb;
     double adsb_every, adsb_dwell;
+    int adsb_gain;                     /* nominal dB during 1090 windows, -1: keep the 1030 gain */
     bool lol;
     double lol_lat, lol_lon;
     int lol_radius;
@@ -41,7 +42,7 @@ static struct {
 } opt = {
     .freq = 1030e6, .fs = 16e6, .lna = 32, .vga = 24, .amp = 0,
     .thr_db = 12, .modes_db = 7, .dens_max = 50, .sep = ',',
-    .adsb_every = 30, .adsb_dwell = 2.9, .lol_radius = 150,
+    .adsb_every = 30, .adsb_dwell = 2.9, .adsb_gain = 64, .lol_radius = 150,
     .agc = true,
     .acfg = { .burst_gap = 0.030, .burst_min = 3, .member_db = 3, .core_db = 6,
               .radar_sel = -1 },
@@ -244,7 +245,8 @@ static void set_mark(hackrf_device *dev, bool to1090)
     marks_w++;
 }
 
-static void route(struct demod *d, int type, const uint8_t *p, size_t n)
+/* p: bytes from stream position pos (bytes, 2 per sample) */
+static void route(struct demod *d, int type, const uint8_t *p, size_t n, uint64_t pos)
 {
     struct demod_stats st;
     if (type == SEG_1030) {
@@ -267,7 +269,7 @@ static void route(struct demod *d, int type, const uint8_t *p, size_t n)
     if (recf) for (size_t k = 0; k < n; k += CHUNK) fwrite(zeros, 1, n - k < CHUNK ? n - k : CHUNK, recf);
     if (type == SEG_1090) {
         if (!in_adsb) { adsb_window_start(); in_adsb = true; }
-        adsb_process((const int8_t *)p, n / 2);
+        adsb_process((const int8_t *)p, n / 2, pos / 2);
     }
 }
 
@@ -285,7 +287,7 @@ static void consume(struct demod *d, const uint8_t *buf, size_t n, uint64_t pos0
         if (marks_r < marks_w && marks[marks_r % 64].pos < seg) seg = marks[marks_r % 64].pos;
         int type = route_mode;
         if (p < guard_end) { type = SEG_SKIP; if (guard_end < seg) seg = guard_end; }
-        route(d, type, buf + (p - pos0), seg - p);
+        route(d, type, buf + (p - pos0), seg - p, p);
         p = seg;
     }
 }
@@ -567,11 +569,16 @@ static void usage(void)
 "                         roll-called addresses are fed to its Beast input (port 30004)\n"
 "                         and mark answered queries with '*': roll-calls by aircraft address,\n"
 "                         UF11 by the II/SI code in DF11; also supplies callsigns. Mode A/C\n"
-"                         replies are not matched. Live HackRF only\n"
+"                         replies are not matched. Live HackRF only. The clock is synced by\n"
+"                         short HackRF windows on 1090 MHz (--adsb-dwell s, default 2 with\n"
+"                         --rx1090): frames heard by both radios. Every 30 s at first, doubling\n"
+"                         up to 5 min while the clock holds; with -B on the -B schedule\n"
+"      --no-1090-sync     no 1090 windows: lock the clock from replies only\n"
 "      --radar-pos LAT,LON[,ALT_M]|NAME  radar position and\n"
 "      --rx-pos LAT,LON[,ALT_M]|NAME     1090 antenna position: the reply delay is then predicted from\n"
 "                         each aircraft's ADS-B position, which locks the clock from 2 replies\n"
-"                         and matches replies to within 40 us. NAME: a line NAME,LAT,LON[,ALT_M]\n"
+"                         and matches replies to within 40 us (also the NM range in the burst\n"
+"                         graph). NAME: a line NAME,LAT,LON[,ALT_M]\n"
 "                         in positions.csv (current directory, then next to the program)\n"
 "      --beep             ring the terminal bell on every burst with matched replies\n"
 "                         (once per burst; also when autofreeze, key F, triggers)\n\n"
@@ -580,6 +587,8 @@ static void usage(void)
 "      --adsb-every S     minimum time between windows (default 30)\n"
 "      --adsb-dwell S     window length (default 2.9); windows are placed right after a\n"
 "                         main-beam burst when the rotation is known, so no burst is lost\n"
+"      --adsb-gain DB     nominal HackRF gain during 1090 windows (default 64; -1 keeps the\n"
+"                         1030 gain, which automatic gain keeps low near a radar)\n"
 "      --adsb-db PATH     load/save the address-callsign table (works with --file too)\n"
 "      --adsblol LAT,LON  at startup, fetch hex/callsign pairs of all aircraft around this\n"
 "                         position from api.adsb.lol (sends the coordinates to adsb.lol)\n"
@@ -626,7 +635,7 @@ int main(int argc, char **argv)
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
         { "no-auto-gain", 0, 0, 17 }, { "rx1090", 1, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
-        { "beep", 0, 0, 22 },
+        { "beep", 0, 0, 22 }, { "no-1090-sync", 0, 0, 23 }, { "adsb-gain", 1, 0, 24 },
         { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
     };
     int c;
@@ -645,6 +654,8 @@ int main(int argc, char **argv)
         case 4: opt.thr_abs = atof(optarg); break;
         case 21: opt.modes_db = atof(optarg); break;
         case 22: opt.beep = true; break;
+        case 23: opt.no_sync = true; break;
+        case 24: opt.adsb_gain = atoi(optarg); break;
         case 5: opt.dens_max = atoi(optarg); break;
         case 6: opt.acfg.burst_gap = atof(optarg) / 1e3; break;
         case 7: opt.acfg.burst_min = atoi(optarg); break;
@@ -671,7 +682,7 @@ int main(int argc, char **argv)
             break;
         case 'B': opt.adsb = true; break;
         case 12: opt.adsb_every = atof(optarg); break;
-        case 13: opt.adsb_dwell = atof(optarg); break;
+        case 13: opt.adsb_dwell = atof(optarg); opt.dwell_set = true; break;
         case 14: opt.adsb_db = optarg; break;
         case 15:
             if (sscanf(optarg, "%lf,%lf", &opt.lol_lat, &opt.lol_lon) != 2 ||
@@ -698,9 +709,11 @@ int main(int argc, char **argv)
     bool dash = !opt.list && !opt.quiet && (live || opt.dashboard);
     if (opt.adsb && !live) { fprintf(stderr, "--adsb needs the HackRF; ignored in --file mode\n"); opt.adsb = false; }
     if (opt.rx1090 && !live) { fprintf(stderr, "--rx1090 needs the live HackRF; ignored in --file mode\n"); opt.rx1090 = NULL; }
-    if (opt.rx1090 && opt.adsb) {
-        fprintf(stderr, "--adsb is not needed with --rx1090 (callsigns come from dump1090); ignored\n");
-        opt.adsb = false;
+    if (opt.rx1090) {
+        /* 1090 windows sync the clock to dump1090 (identical frames); callsigns come from dump1090 anyway */
+        opt.adsb_cs = opt.adsb;             /* -B: windows on its fixed schedule; otherwise only as the sync needs */
+        opt.adsb = opt.adsb_cs || !opt.no_sync;
+        if (opt.adsb && !opt.dwell_set) opt.adsb_dwell = 2.0;
     }
     bool any_cs = false;
     for (int k = 0; k < opt.acfg.nac; k++) if (opt.acfg.ac[k].addr < 0) any_cs = true;
@@ -736,6 +749,7 @@ int main(int argc, char **argv)
     if (opt.rx1090) {
         if (rx1090_start(opt.rx1090) < 0) { fprintf(stderr, "--rx1090: bad address '%s' (HOST:PORT)\n", opt.rx1090); return 1; }
         analysis_set_rx(rx1090_ready, rx1090_match);
+        if (opt.adsb) adsb_set_frame_hook(rx1090_hframe);
         if (opt.radar_pos && opt.rx_pos) {
             double rl, ro, ra, xl, xo, xa;
             const char *bad = NULL;
@@ -881,7 +895,8 @@ int main(int argc, char **argv)
             double rot = analysis_rotation();
             ri.adsb_now = adsb_active;
             if (!adsb_active) {
-                double wait = opt.adsb_every - (cap_t - adsb_last_end);
+                double every = opt.rx1090 && !opt.adsb_cs ? rx1090_sync_interval(now) : opt.adsb_every;
+                double wait = every - (cap_t - adsb_last_end);
                 ri.adsb_next = wait > 0 ? wait : -1;
                 if (wait <= 0) {
                     bool go = true;
@@ -894,6 +909,7 @@ int main(int argc, char **argv)
                     if (-wait > 3 * rot + 10) go = true;              /* never starve the table */
                     if (go) {
                         set_mark(dev, true);
+                        if (opt.adsb_gain >= 0) hw_gain(dev, gain_from_total(opt.adsb_gain));   /* aircraft, not the radar */
                         adsb_active = true;
                         adsb_pos = captured();
                     }
@@ -974,6 +990,9 @@ int main(int argc, char **argv)
                 x.peer, x.frames, x.npos, x.locks, x.locked ? "" : ", not locked at the end",
                 x.locked && x.geo ? " (from positions)" : "", x.relocks, x.drift_ppm, x.rc_ans, x.rc, x.ac_ans, x.ac);
         if (x.geo && x.nres) fprintf(sf, "; residual rms %.1f us over %ld matches", x.res_rms_us, x.nres);
+        if (x.sync_windows)
+            fprintf(sf, "; clock synced by %ld 1090 windows (last: %d frames, rms %.2f us)%s", x.sync_windows, x.sync_n,
+                    x.sync_rms_us, x.frames_lock ? "" : ", windows stopped");
         fputc('\n', sf);
     }
     analysis_print_summary(sf);

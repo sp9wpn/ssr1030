@@ -154,7 +154,9 @@ struct adsb_stats {
 };
 void adsb_init(double fs);
 void adsb_window_start(void);
-void adsb_process(const int8_t *iq, size_t nsamples);
+void adsb_process(const int8_t *iq, size_t nsamples, uint64_t s0);   /* s0: stream sample index of iq[0] */
+void adsb_set_frame_hook(void (*hook)(const uint8_t *msg, int nbits, double t));   /* every decoded frame,
+                                     t = stream time of its preamble start */
 void adsb_get_stats(struct adsb_stats *s);
 const char *cs_lookup(uint32_t addr);       /* callsign or NULL */
 const char *ac_name(uint32_t addr);         /* callsign when known, else hex */
@@ -202,6 +204,11 @@ struct rx1090_stats {
     double off_ms, drift_ppm;
     long locks;             /* times the clock lock was found */
     long relocks;           /* times the geometry re-check moved the lock */
+    bool frames_lock;       /* clock from the HackRF's 1090 windows */
+    long sync_windows;      /* 1090 windows that gave the offset */
+    int sync_n;             /* matched frames in the last one */
+    double sync_rms_us, sync_jump_us;   /* their spread; last offset minus the tracked clock (NAN at a lock) */
+    double sync_iv;         /* s between sync windows now */
     long rc, rc_ans;        /* roll-calls checked / answered (since lock) */
     long ac, ac_ans;        /* UF11 all-calls checked / answered */
     char peer[128];
@@ -215,6 +222,8 @@ void rx1090_poll(double t_now);                      /* main loop: take new repl
 bool rx1090_ready(double t);                         /* replies for a query at t are in */
 void rx1090_match(struct interrog *x);               /* set answered/reply fields, queries in time order */
 void rx1090_get_stats(struct rx1090_stats *s);
+double rx1090_sync_interval(double t_now);           /* wanted s from the last 1090 window to the next */
+void rx1090_hframe(const uint8_t *msg, int nbits, double t);   /* HackRF 1090-window frame at stream time t */
 void rx1090_set_geometry(double rlat, double rlon, double ralt, double xlat, double xlon, double xalt);
 
 /* ---- display.c ---- */

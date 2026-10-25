@@ -133,6 +133,8 @@ int cs_save(const char *path)
 static double fs, spus;
 static float *mag;                 /* tail + current block */
 static size_t mcap, mlen, resume;
+static uint64_t mbase;             /* stream sample index of mag[0] */
+static void (*frame_hook)(const uint8_t *msg, int nbits, double t);
 static int o_hi[4], o_lo[6];
 static struct adsb_stats st;
 
@@ -154,6 +156,8 @@ void adsb_window_start(void)
 }
 
 void adsb_get_stats(struct adsb_stats *s) { *s = st; }
+
+void adsb_set_frame_hook(void (*hook)(const uint8_t *msg, int nbits, double t)) { frame_hook = hook; }
 
 static const char charset[65] = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ##### ###############0123456789######";
 
@@ -208,7 +212,8 @@ static bool frame(const uint8_t *msg, int nbits, bool count)
     return true;
 }
 
-static int try_decode(const float *m, float thr)
+/* m: magnitude from the preamble start, at stream sample index at */
+static int try_decode(const float *m, float thr, uint64_t at)
 {
     uint8_t msg[14] = { 0 };
     double base = 8.0 * spus, bl = spus, hb = 0.5 * spus;
@@ -224,6 +229,7 @@ static int try_decode(const float *m, float thr)
         }
     }
     if (!frame(msg, nbits, true)) return 0;
+    if (frame_hook) frame_hook(msg, nbits, at / fs);
     return (int)lround((8 + nbits) * spus);
 }
 
@@ -232,8 +238,9 @@ void adsb_frame(const uint8_t *msg, int nbits)
     frame(msg, nbits, false);
 }
 
-void adsb_process(const int8_t *iq, size_t ns)
+void adsb_process(const int8_t *iq, size_t ns, uint64_t s0)
 {
+    if (!mlen || mbase + mlen != s0) { mlen = 0; resume = 0; mbase = s0; }   /* new window or a gap */
     size_t need = mlen + ns;
     if (need > mcap) {
         mcap = need + 65536;
@@ -274,12 +281,13 @@ void adsb_process(const int8_t *iq, size_t ns)
             lq /= 6;
             if (hq - lq > bs) { bs = hq - lq; best = q; }
         }
-        int len = try_decode(mag + best, h);
+        int len = try_decode(mag + best, h, mbase + best);
         p = len ? best + len : p + 1;
     }
     resume = p > end ? p - end : 0;
     memmove(mag, mag + end, (mlen - end) * sizeof(float));
     mlen -= end;
+    mbase += end;
 }
 
 /* ---------------- adsb.lol bootstrap ---------------- */

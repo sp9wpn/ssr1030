@@ -480,7 +480,10 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
             if (!x.locked) printf(YEL "clock: searching" R DIM " (%s)" R, x.geo_on ? "needs replies from aircraft with ADS-B positions, in 2 scans or from 2 aircraft"
                                                                                  : "needs roll-calls answered by known aircraft");
             else {
-                printf(GRN "clock locked" R " (%s) drift %+.1f ppm", x.geo ? "positions" : "delay histogram", x.drift_ppm);
+                if (x.frames_lock)
+                    printf(GRN "clock locked" R " (1090 windows every %.0f s: %d frames, rms %.1f us) drift %+.2f ppm", x.sync_iv,
+                           x.sync_n, x.sync_rms_us, x.drift_ppm);
+                else printf(GRN "clock locked" R " (%s) drift %+.1f ppm", x.geo ? "positions" : "delay histogram", x.drift_ppm);
                 if (x.geo && x.nres) printf("  residual rms %.1f us", x.res_rms_us);
                 printf("   answered* roll-call %ld/%ld", x.rc_ans, x.rc);
                 if (x.rc) printf(" (%.0f%%)", 100.0 * x.rc_ans / x.rc);
