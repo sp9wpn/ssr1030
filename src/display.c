@@ -493,7 +493,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         printf("1090 replies: dump1090 %s ", x.peer);
         if (!x.connected) printf(RED "not connected" R " (start dump1090 or readsb with --net)");
         else {
-            printf(GRN "connected" R " %.0f frames/s%s  ", x.rate, x.feeding ? "" : RED " (addresses not fed to port 30004)" R);
+            printf(GRN "connected" R " %.0f frames/s%s  ", x.rate, x.feed_failed ? RED " (addresses not fed to port 30004)" R : "");
             if (!x.locked) printf(YEL "clock: searching" R DIM " (%s)" R, x.geo_on ? "needs replies from aircraft with ADS-B positions, in 2 scans or from 2 aircraft"
                                                                                  : "needs roll-calls answered by known aircraft");
             else {

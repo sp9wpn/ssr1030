@@ -105,7 +105,7 @@ RADAR,52.1000,21.0000,150
 HOME,52.0900,21.0100,120
 ```
 
-Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acquisition or DF17) it has not heard in the last minute. ssr1030 therefore sends every roll-called address to dump1090's Beast input (port 30004, same host) as a DF11 acquisition squitter every 20 s. dump1090 then accepts that aircraft's replies. These announced aircraft also appear in dump1090's own aircraft list.
+Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acquisition or DF17) it has not heard in the last minute. ssr1030 therefore sends every roll-called address to dump1090's Beast input (port 30004, same host) as a DF11 acquisition squitter every 20 s. dump1090 then accepts that aircraft's replies. These announced aircraft also appear in dump1090's own aircraft list. Port 30004 is optional: without it matching still works, with fewer replies. The dashboard shows `addresses not fed to port 30004` in red only when sending there failed (connection refused, or dump1090 closed it); it clears with the next successful send.
 
 - **Marking:** an answered query gets `*`:
   - in the recent list and `-L` output, after the `B` flag;

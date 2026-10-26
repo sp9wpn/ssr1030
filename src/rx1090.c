@@ -132,7 +132,7 @@ static volatile bool quit;
 static pthread_mutex_t mx = PTHREAD_MUTEX_INITIALIZER;
 static struct raw inq[INQ];
 static uint64_t in_w, in_r;
-static volatile bool connected, feeding;
+static volatile bool connected, feed_failed;  /* feed_failed: the last try to announce to port 30004 failed */
 static uint32_t ann[ANN_N];
 static uint64_t ann_w, ann_r;
 
@@ -252,11 +252,11 @@ static void announce_pending(int *fd)
         pthread_mutex_unlock(&mx);
         if (!any) return;
         if (*fd < 0) *fd = dial(BEAST_IN);
-        if (*fd < 0) { feeding = false; continue; }
+        if (*fd < 0) { feed_failed = true; continue; }
         uint8_t f[40];
         int n = squitter_frame(a, f);
-        if (send(*fd, f, n, MSG_NOSIGNAL) != n) { close(*fd); *fd = -1; feeding = false; continue; }
-        feeding = true;
+        if (send(*fd, f, n, MSG_NOSIGNAL) != n) { close(*fd); *fd = -1; feed_failed = true; continue; }
+        feed_failed = false;
     }
 }
 
@@ -1026,7 +1026,7 @@ void rx1090_match(struct interrog *x)
 void rx1090_get_stats(struct rx1090_stats *s)
 {
     S.connected = connected;
-    S.feeding = feeding;
+    S.feed_failed = feed_failed;
     S.locked = locked;
     S.geo_on = geo_on;
     S.frames_lock = lock_frames;

@@ -200,7 +200,7 @@ int rx1090_range(const struct rx1090_rec *r, double az, double out_m[2]);   /* r
                             angle az (rad) from the antenna direction: 0-2 solutions */
 struct rx1090_stats {
     bool connected, locked;
-    bool feeding;           /* roll-called addresses are announced to dump1090 */
+    bool feed_failed;       /* announcing roll-called addresses to dump1090 (port 30004) failed last time */
     bool geo;               /* locked from aircraft positions */
     bool geo_on;            /* radar and receiver positions given */
     double res_rms_us;      /* rms of measured - predicted delay, last 64 matches */
