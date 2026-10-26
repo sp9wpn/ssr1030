@@ -55,10 +55,12 @@ These apply to statistics, bursts, the log and `--list`. TCAS stays a separate s
 
 - `-r, --radar SI37|II3`: keeps one radar.
   - Mode S interrogations carry the code: UF11 has II/SI, and UF4/5/20/21 have SIS (DI=3) or IIS (DI=0/1/7).
+  - IIS=0 is not proof of II0: SI-code radars send IIS=0 too, and their SI code only in UF11 and DI=3 roll-calls. So a roll-call with IIS=0 takes its burst's code, and a burst is named II0 only when IIS=0 roll-calls are all it has (for example an airport multilateration interrogator).
   - All-call interrogations are attributed through the main-beam burst they belong to. A burst gets the majority code of the interrogations inside it.
   - Plain Mode A/C (no P4) is never part of a burst that has a Mode S code, and is never attributed to it: a Mode S radar sends A/C-only all-calls instead, so plain A/C comes from another radar.
   - Outside bursts, an all-call is attributed if a UF11 was sent less than 300 µs before it.
   - Anything left unattributed is dropped.
+  - The burst list, radar table and burst chart show only bursts with that radar's code. Another radar's burst can contain a query of the filtered radar heard in between; that query still counts in the statistics.
 - `-S, --modes-only`: drops plain Mode A/C and intermode (A/C-only and A/C/S all-calls).
 - `-C, --ac-only`: keeps only plain Mode A/C (tokens `AA`/`CC`, no P4), as sent by older SSR radars. It drops Mode S and all intermode all-calls (`A`/`C`, `As`/`Cs`). It cannot be combined with `-S`, `-R`, `-A` or `-c`. The key `C` toggles it at run time.
 - `-c, --no-plain-ac`: drops plain Mode A/C (tokens `AA`/`CC`, no P4). Mode S and intermode all-calls stay. The key `c` toggles it at run time.
@@ -78,14 +80,15 @@ A second receiver on 1090 MHz shows which interrogations were answered. Any rece
 
 ```
 dump1090 --device-type rtlsdr --net --net-ro-interval 0.05 --quiet
-./ssr1030 --rx1090 localhost:30005
+./ssr1030 --rx1090                  # localhost:30005 is the default
+./ssr1030 --rx1090 otherhost:30005  # dump1090 on another computer
 ```
 
 With the radar and antenna positions, the clock locks from ADS-B positions (see **Clock** below):
 
 ```
-./ssr1030 --rx1090 localhost:30005 --radar-pos 52.1000,21.0000,150 --rx-pos 52.0900,21.0100,120
-./ssr1030 --rx1090 localhost:30005 --radar-pos RADAR --rx-pos HOME
+./ssr1030 --rx1090 --radar-pos 52.1000,21.0000,150 --rx-pos 52.0900,21.0100,120
+./ssr1030 --rx1090 --radar-pos RADAR --rx-pos HOME
 ```
 
 The names come from `positions.csv` (in the current directory, else next to the program); `--adsblol` accepts them too. It is in `.gitignore`, so your positions stay out of the repository. One `NAME,LAT,LON[,ALT_M]` line per site, in decimal degrees and metres; lines starting with `#` are skipped, and names are not case-sensitive:
@@ -131,17 +134,17 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - DF20/21: also the register the query asked for: BDS 2,0 callsign; 4,0 selected altitude (MCP/FMS) and QNH; 5,0 roll, track, ground speed, turn rate, TAS; 6,0 heading, IAS, Mach, vertical rates.
   - The header shows `replies N`.
   ```
-      +22.78 ms     +1.69°  UF4          RYR48SC*      -16.4 ███████████████████████
-                            ↳ DF4   131.6 µs  res +0.1  2.2 or 5.8 NM (ADS-B 2.3 NM)  alt 8950 ft
-      +34.33 ms     +2.53°  UF5          RYR48SC*      -16.9 ██████████████████████
-                            ↳ DF5   131.4 µs  res -0.1  2.4 or 5.6 NM (ADS-B 2.3 NM)  squawk 6162
+    +22.78 ms   +1.69°  UF4          RYR48SC* SI17      -16.4 ███████████████████████
+                        ↳ DF4   131.6 µs  res +0.1  2.2 or 5.8 NM (ADS-B 2.3 NM)  alt 8950 ft
+    +34.33 ms   +2.53°  UF5          RYR48SC* SI17      -16.9 ██████████████████████
+                        ↳ DF5   131.4 µs  res -0.1  2.4 or 5.6 NM (ADS-B 2.3 NM)  squawk 6162
   ```
 - **Range:** with `--radar-pos`/`--rx-pos` and a position-based lock, each reply row also shows the estimated radar→aircraft distance in NM.
   - The reply delay gives the path radar → aircraft → antenna. The query's antenna angle from the beam middle gives the aircraft's direction from the radar, and its altitude (from this reply or a recent one, or from ADS-B) gives its height. Together they fix the distance.
   - Near the radar→antenna line two distances fit; both are shown (`2.2 or 5.8 NM`). There a 1 µs timing error moves the estimate by kilometres, while elsewhere it moves it by about 150 m.
   - With no altitude known, the aircraft is assumed to be at the radar's height.
   - When dump1090 has a recent ADS-B position, its distance follows in brackets, for comparison (`(ADS-B 2.3 NM)`).
-- **Autofreeze (`F`):** arms a one-shot freeze. The first burst with a matched reply freezes the screen and opens it in the burst chart; `space` returns to live. The status line shows `AUTOFREEZE` while armed. Without `--rx1090`, `F` only shows a hint.
+- **Autofreeze (`F`):** arms a one-shot freeze. The first burst with a matched reply freezes the screen and opens it in the burst chart; `space` returns to live, and `F` returns to live and arms it again. The status line shows `AUTOFREEZE` while armed. Without `--rx1090`, `F` only shows a hint.
 - **Beep (`--beep`):** rings the terminal bell once for every burst with at least one matched reply, with or without autofreeze. This includes the burst that triggers autofreeze.
 - **Callsigns:** DF17 identification and Comm-B BDS 2,0 from dump1090 fill the callsign table, so `-B` is not needed. The 1090 windows used for the clock sync also run the `-B` decoder, so its callsigns count too.
 - **Debug:** `RX1090_DEBUG=1` prints each lock attempt to stderr. `RX1090_LOG=FILE` writes every reply (12 MHz time in s, DF, address, II/SI code, hex) and the clock data, for offline analysis.
@@ -268,20 +271,21 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 `b` switches the whole screen to the latest beam pass of the main radar, one row per query in time order:
 
 ```
-   -262.58 ms    -19.50°  AA                     -18.5 ░░░░░░░           P2
-    -36.42 ms     -2.70°  UF4b40       4a2182     -9.1 ████████████P5█████████████████
-    -23.35 ms     -1.73°  A                        1.2 ██P2█████████████████████████████████████████████████████
-    +47.23 ms     +3.51°  AA                     -20.1 ▒▒▒
+   -262.58 ms  -19.50°  AA                               -18.5 ░░░░░░░           P2
+    -36.42 ms   -2.70°  UF4b40       4a2182    SI17       -9.1 ████████████P5█████████████████
+    -23.35 ms   -1.73°  A                                  1.2 ██P2█████████████████████████████████████████████████████
+    +47.23 ms   +3.51°  AA                               -20.1 ▒▒▒
 ```
 
 - **Scale:** fixed, from −45 dBFS (below the noise floor; `--graph-floor DB` changes it) to +3 dBFS (where I/Q clipping starts), so bar lengths compare between bursts. The header shows the gain each burst was received with.
-- **Each row:** time relative to the middle of the beam pass, antenna angle from the beam middle (from the radar's rotation period, shown in the header; `-` while it is unknown), amplitude = P6 for Mode S and P1 for A/C, query token (12 characters), target (8 characters: callsign when known, else hex address), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
-- **Bar character:**
-  - `█` in-beam query
-  - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
-  - `▒` other weak query that is not SLS
+- **Each row:** time relative to the middle of the beam pass, antenna angle from the beam middle (from the radar's rotation period, shown in the header; `-` while it is unknown), amplitude = P6 for Mode S and P1 for A/C, query token (12 characters), target (8 characters: callsign when known, else hex address), the II/SI code when the query carries one (UF11 II/SI, roll-call SIS with DI=3 or IIS with DI=0/1/7, so IIS=0 shows as `II0`), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
+- **Bar colour** (plain ANSI background colours; the examples here stand them in as `█` `░` `▒`):
+  - green: in-beam query
+  - yellow: sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
+  - grey: other weak query that is not SLS
 - **SLS pulses:** `P2` (A/C) and `P5` (Mode S) are drawn at the column matching their level. They appear inside the bar when weaker than P1, and after the bar end when stronger, which is what suppresses the transponder.
   - The marker is always drawn at the level read at the P2 (A/C) or P5 (Mode S) slot, also when no pulse stands out of the noise: a pulse at noise level and no pulse at all give the same reading, so the chart does not tell them apart. (For the SLS flag and the statistics, a pulse still counts only from noise + 6 dB.) Mode S has no P2 to look for (it is part of the preamble).
+  - A black dot on each bar marks the receiver noise floor when that query was heard: the demodulator's running average, updated every 8 ms block and smoothed over about 160 ms, so it moves with gain changes. Where the P2/P5 marker covers the same spot, the marker wins.
   - P5 is measured at the sync phase reversal. P6 flips phase there but P5 does not.
   - Across ±0.35 µs around the expected sync, the signal is fitted as a constant P5 plus a P6 that changes sign once. The best split point is the reversal, and P5 = |mean before + mean after|/2, P6 = |mean before − mean after|/2.
   - This finds the reversal even when it falls between samples, and it also works when a strong P5 masks the sync.

@@ -359,6 +359,7 @@ static void match(struct demod *d, uint64_t i)
     it.p5_db = NAN;
     it.sls_floor_db = NAN;
     it.p6_db = NAN;
+    it.noise_db = d->noise > 0 ? dbfs(d->noise) : NAN;
 
     /* --- Mode S: P1, P2 @2.0, P6 @3.5 --- */
     int j2 = find_at(d, i, 2.0, 0.2, true, false);

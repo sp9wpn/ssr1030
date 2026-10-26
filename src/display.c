@@ -147,8 +147,8 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
  * One row per query, in time order: time relative to the middle of the beam
  * pass, query/target, amplitude and a horizontal bar whose length is the
  * amplitude. The bar character tells the class: beam, sidelobe, weak. */
-static const char *gp_char(int cls) { return cls == GP_BEAM ? "\u2588" : cls == GP_SIDE ? "\u2591" : "\u2592"; }
-static const char *gp_color(int cls) { return cls == GP_BEAM ? GRN : cls == GP_SIDE ? YEL : DIM; }
+/* bar background: in-beam green, sidelobe yellow, other weak grey */
+static const char *gp_bg(int cls) { return cls == GP_BEAM ? "\033[42m" : cls == GP_SIDE ? "\033[43m" : "\033[100m"; }
 
 static float graph_bot = -45.0f;        /* bar scale left edge, dBFS (--graph-floor) */
 #define GRAPH_TOP_DBFS (3.0f)
@@ -239,8 +239,8 @@ static void draw_graph(int cols, int rows)
 
     /* bar width: screen minus the row prefix, 5 columns spare */
     char probe[96];
-    int plen = snprintf(probe, sizeof(probe), "%+10.2f ms  %+8.2fd  %-12.12s %-8.8s%s %-3s %6.1f ",
-                        -9999.99, -999.99, "", "", " ", "", -99.9);
+    int plen = snprintf(probe, sizeof(probe), "%+8.2f ms %+7.2fd  %-12.12s %-8.8s%s %-4s %-3s %6.1f ",
+                        -9999.99, -999.99, "", "", " ", "", "", -99.9);
     int W = cols - plen - 5;
     if (W < 10) W = 10;
     for (int i = g_scroll; i < last; i++) {
@@ -269,19 +269,27 @@ static void draw_graph(int cols, int rows)
             if (mpos > W) mpos = W;
         }
         /* fixed-width fields: query 12 (longest token, e.g. S-msg/hdgSpd), target 8 (callsign or hex),
-         * "*" when it was answered on 1090, "sls" when the query reached us through a sidelobe */
-        char deg[16] = "       -  ";      /* antenna angle from the beam middle, from the rotation */
-        if (rot > 0) snprintf(deg, sizeof(deg), "%+8.2f\u00b0 ", 360.0 * (g->t - mid) / rot);
-        printf("%s%+10.2f ms  %s %-12.12s %-8.8s%s %-3s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), deg,
-               ts, tg, g->ans ? "*" : " ", g->cls == GP_SIDE ? "sls" : "", g->amp);
+         * "*" when it was answered on 1090, the II/SI code sent in the query,
+         * "sls" when the query reached us through a sidelobe */
+        char deg[16] = "      -  ";      /* antenna angle from the beam middle, from the rotation */
+        if (rot > 0) snprintf(deg, sizeof(deg), "%+7.2f\u00b0 ", 360.0 * (g->t - mid) / rot);
+        char rc[8] = "";
+        if (g->code >= 0) radar_code_str(g->code, rc, sizeof(rc));
+        printf("%s%+8.2f ms %s %-12.12s %-8.8s%s %-4s %-3s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), deg,
+               ts, tg, g->ans ? "*" : " ", rc, g->cls == GP_SIDE ? "sls" : "", g->amp);
         fputs(R, stdout);
+        /* noise floor: a black dot on the bar's colour, unless the marker is there */
+        int npos = isnan(g->noise) ? -1 : (int)lroundf((g->noise - ybot) / (ytop - ybot) * W) - 1;
+        if (npos < 0) npos = isnan(g->noise) ? -1 : 0;
         int end = mpos > len ? mpos : len;
         for (int k = 0; k < end; k++) {
             if (mk && k >= mpos - 2 && k < mpos) {
                 /* inside the bar: inverse, beyond it: plain bold */
                 printf(k < len ? R "\033[1;7;31m%c" R : R B RED "%c" R, mk[k - (mpos - 2)]);
+            } else if (k == npos) {
+                printf(R "%s\033[30m\u00b7" R, gp_bg(g->cls));
             } else if (k < len) {
-                printf("%s%s", gp_color(g->cls), gp_char(g->cls));
+                printf(R "%s ", gp_bg(g->cls));
             } else {
                 fputs(R " ", stdout);
             }
@@ -291,7 +299,7 @@ static void draw_graph(int cols, int rows)
         for (int k = 0; k < g->rep_n; k++) {
             const struct rx1090_rec *r = rx1090_rec_get(g->rep_idx + k);
             char line[320], c[200];
-            if (!r) { snprintf(line, sizeof(line), "%26s" DIM "\u21b3 (reply no longer stored)" R, ""); }
+            if (!r) { snprintf(line, sizeof(line), "%22s" DIM "\u21b3 (reply no longer stored)" R, ""); }
             else {
                 char res[24] = "", rng[64] = "";
                 if (!isnan(r->res_us)) snprintf(res, sizeof(res), "  res %+.1f", r->res_us);
@@ -304,7 +312,7 @@ static void draw_graph(int cols, int rows)
                 if (nr) o += snprintf(rng + o, sizeof(rng) - o, " NM");
                 if (!isnan(r->adsb_m)) snprintf(rng + o, sizeof(rng) - o, "%s(ADS-B %.1f NM)", nr ? " " : "  ", r->adsb_m / 1852);
                 reply_describe(r, c, sizeof(c));
-                snprintf(line, sizeof(line), "%26s" CYN "\u21b3 DF%-2d %6.1f \u00b5s%s%s  %s" R, "", r->df, r->delay_us, res, rng, c);
+                snprintf(line, sizeof(line), "%22s" CYN "\u21b3 DF%-2d %6.1f \u00b5s%s%s  %s" R, "", r->df, r->delay_us, res, rng, c);
             }
             put_cut(line, cols - 1);
             fputs(EL, stdout);

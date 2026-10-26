@@ -26,6 +26,7 @@
 #define NBINS       2000
 #define PENDING     65536
 #define OUTQ        65536
+#define BURST_CODE_MIN 2           /* queries with the code needed to name a burst (temporary) */
 #define PAIR_S      0.0003
 
 struct analysis_state AS;
@@ -483,8 +484,15 @@ static bool graph_extra_ok(const struct interrog *y)
     return true;
 }
 
-static void graph_put(struct burst *b, double t, float amp, float p2, float p5, float sq, uint32_t addr, uint16_t tok,
-                      int ka, int cls, bool ans, uint64_t rep_idx, int rep_n)
+/* II/SI code as sent: IIS 0 shows as II0 (see modes_iis0) */
+static int radio_code(const struct interrog *y)
+{
+    int c = modes_own_code(y);
+    return c >= 0 ? c : modes_iis0(y) ? 0 : -1;
+}
+
+static void graph_put(struct burst *b, double t, float amp, float p2, float p5, float sq, float noise, uint32_t addr, uint16_t tok,
+                      int ka, int cls, bool ans, uint64_t rep_idx, int rep_n, int code)
 {
     if (b->ngp >= SEQ_MAX) return;
     struct gpoint *g = &b->gp[b->ngp++];
@@ -494,12 +502,14 @@ static void graph_put(struct burst *b, double t, float amp, float p2, float p5, 
     g->p2 = p2;
     g->p5 = p5;
     g->sq = sq;
+    g->noise = noise;
     g->tok = tok;
     g->ka = (uint8_t)ka;
     g->cls = (uint8_t)cls;
     g->ans = ans;
     g->rep_idx = rep_idx;
     g->rep_n = (uint8_t)rep_n;
+    g->code = (int8_t)code;
     if (cls == GP_SIDE) b->nside++;
     if (cls == GP_WEAK) b->nweak++;
 }
@@ -518,7 +528,7 @@ static uint32_t gaddr(const struct interrog *y) { return directed(y->kind) ? y->
 
 static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka)
 {
-    graph_put(b, y->t, y->amp_db, abs_p2(y), abs_p5(y), y->sls_floor_db, gaddr(y), seq_token(y), ka, cls, y->answered, y->rep_idx, y->rep_n);
+    graph_put(b, y->t, y->amp_db, abs_p2(y), abs_p5(y), y->sls_floor_db, y->noise_db, gaddr(y), seq_token(y), ka, cls, y->answered, y->rep_idx, y->rep_n, radio_code(y));
 }
 
 /* Non-beam queries for the graph. Sidelobes are kept from 60 % of a rotation
@@ -528,7 +538,7 @@ static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka
 #define GRING 16384
 #define NPOST 8
 static struct {
-    double t; float amp, p2, p5, sq; uint32_t addr; uint16_t tok; uint8_t cls; bool ans; uint8_t rep_n; uint64_t rep_idx;
+    double t; float amp, p2, p5, sq; float noise; uint32_t addr; uint16_t tok; uint8_t cls; bool ans; uint8_t rep_n; int8_t code; uint64_t rep_idx;
 } gring[GRING];
 static uint64_t gring_n;
 static struct { int idx; double until_side, until_weak; } posts[NPOST];
@@ -542,13 +552,13 @@ static void graph_note(const struct interrog *y)
     for (int p = 0; p < nposts; p++) {
         double until = cls == GP_SIDE ? posts[p].until_side : posts[p].until_weak;
         if (y->t <= until && AS.nhist - posts[p].idx <= BURST_HIST)
-            graph_put(&AS.hist[posts[p].idx % BURST_HIST], y->t, y->amp_db, abs_p2(y), abs_p5(y), y->sls_floor_db, gaddr(y), tok,
-                      NO_TARGET, cls, y->answered, y->rep_idx, y->rep_n);
+            graph_put(&AS.hist[posts[p].idx % BURST_HIST], y->t, y->amp_db, abs_p2(y), abs_p5(y), y->sls_floor_db, y->noise_db, gaddr(y), tok,
+                      NO_TARGET, cls, y->answered, y->rep_idx, y->rep_n, radio_code(y));
     }
     int i = gring_n++ % GRING;
     gring[i].t = y->t; gring[i].amp = y->amp_db; gring[i].tok = tok; gring[i].cls = (uint8_t)cls;
-    gring[i].p2 = abs_p2(y); gring[i].p5 = abs_p5(y); gring[i].sq = y->sls_floor_db; gring[i].addr = gaddr(y); gring[i].ans = y->answered;
-    gring[i].rep_idx = y->rep_idx; gring[i].rep_n = y->rep_n;
+    gring[i].p2 = abs_p2(y); gring[i].p5 = abs_p5(y); gring[i].sq = y->sls_floor_db; gring[i].noise = y->noise_db; gring[i].addr = gaddr(y); gring[i].ans = y->answered;
+    gring[i].rep_idx = y->rep_idx; gring[i].rep_n = y->rep_n; gring[i].code = (int8_t)radio_code(y);
 }
 
 static int cmp_gp(const void *x, const void *y)
@@ -577,8 +587,8 @@ static void graph_context(struct burst *b, double t0, double t1, double margin, 
         double lo = gring[i].cls == GP_SIDE ? t0 - half : t0 - margin;
         double hi = gring[i].cls == GP_SIDE ? t1 + half : t1 + margin;
         if (gring[i].t < lo || gring[i].t > hi) continue;
-        graph_put(b, gring[i].t, gring[i].amp, gring[i].p2, gring[i].p5, gring[i].sq, gring[i].addr, gring[i].tok, NO_TARGET,
-                  gring[i].cls, gring[i].ans, gring[i].rep_idx, gring[i].rep_n);
+        graph_put(b, gring[i].t, gring[i].amp, gring[i].p2, gring[i].p5, gring[i].sq, gring[i].noise, gring[i].addr, gring[i].tok, NO_TARGET,
+                  gring[i].cls, gring[i].ans, gring[i].rep_idx, gring[i].rep_n, gring[i].code);
     }
     qsort(b->gp, b->ngp, sizeof(b->gp[0]), cmp_gp);
 }
@@ -736,6 +746,11 @@ static void close_burst(void)
     o->open = false;
     int code = -1, bn = 0;
     for (int c = 0; c < NCODES; c++) if (o->votes[c] > bn) { bn = o->votes[c]; code = c; }
+    /* temporary: a code needs BURST_CODE_MIN queries carrying it, so one stray
+     * query of another radar heard during a burst does not name it */
+    if (bn < BURST_CODE_MIN) code = -1;
+    /* IIS 0 alone: an II0 interrogator (SI radars send their code in UF11 and DI 3 too) */
+    if (bn == 0 && o->iis0 >= BURST_CODE_MIN) code = 0;
     bool valid = o->n_raw >= AS.cfg.burst_min;
 
     static struct burst rec;
@@ -745,7 +760,10 @@ static void close_burst(void)
     rec.partial = o->partial;
     drain(o->id, code, valid, &rec);
     if (valid && (AS.cfg.radar_sel < 0 || code == AS.cfg.radar_sel)) AS.last_burst_end = o->t1;
-    if (valid && rec.n > 0) {
+    /* radar filter: only that radar's bursts. Another radar's burst can hold a
+     * query that passed it (a UF11 of the filtered radar heard in between, or
+     * an all-call paired with one), but the burst is not the filtered radar's */
+    if (valid && rec.n > 0 && (AS.cfg.radar_sel < 0 || code == AS.cfg.radar_sel)) {
         double margin = o->t1 - o->t0;
         if (margin < 0.03) margin = 0.03;
         if (margin > 0.2) margin = 0.2;
@@ -802,6 +820,7 @@ static void stage1(struct interrog *x, uint64_t idx)
                 o->t1 = x->t;
                 int c = modes_own_code(x);
                 if (c >= 0 && c < NCODES) o->votes[c]++;
+                else if (modes_iis0(x)) o->iis0++;
             }
         }
     }

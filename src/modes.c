@@ -76,12 +76,20 @@ int modes_own_code(const struct interrog *it)
     case K_UF4: case K_UF5: case K_UF20: case K_UF21: {
         int di = getbits(m, 14, 16);
         if (di == 3) { int sis = getbits(m, 17, 22); return sis ? 16 + sis : -1; }
-        if (di == 0 || di == 1 || di == 7) return getbits(m, 17, 20);
+        /* IIS 0 is also what SI-code radars send outside DI 3: not proof of II0 */
+        if (di == 0 || di == 1 || di == 7) { int iis = getbits(m, 17, 20); return iis ? iis : -1; }
         return -1;
     }
     default:
         return -1;
     }
+}
+
+bool modes_iis0(const struct interrog *it)
+{
+    if (it->kind != K_UF4 && it->kind != K_UF5 && it->kind != K_UF20 && it->kind != K_UF21) return false;
+    int di = getbits(it->msg, 14, 16);
+    return (di == 0 || di == 1 || di == 7) && getbits(it->msg, 17, 20) == 0;
 }
 
 int radar_code_parse(const char *s)

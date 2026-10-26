@@ -24,9 +24,11 @@ struct gpoint {
     float amp;              /* dBFS */
     float p2, p5;           /* SLS pulse levels, dBFS; NAN when not detected */
     float sq;               /* no SLS pulse: level at its slot, dBFS; NAN otherwise */
+    float noise;            /* noise floor, dBFS */
     uint32_t addr;          /* addressed aircraft, NO_ADDR when none */
     uint16_t tok;           /* seq_token */
     uint8_t ka;             /* target index, NO_TARGET when none */
+    int8_t code;            /* II/SI code sent in the query (radar_code_str), -1 none */
     uint8_t cls;            /* GP_BEAM, GP_SIDE, GP_WEAK */
     bool ans;               /* answered on 1090 */
     uint8_t rep_n;          /* matched replies, rx1090 records rep_idx.. */
@@ -64,6 +66,7 @@ struct open_burst {
     double t0, t1;
     int n_raw;
     int votes[NCODES];
+    int iis0;                   /* roll-calls with IIS 0: II0 only when no code was seen */
     bool partial;
 };
 

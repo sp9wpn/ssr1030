@@ -42,6 +42,7 @@ struct interrog {
     float p6_db;        /* Mode S P6 plateau, dBFS; NAN for A/C */
     float p2_db;        /* P2 - P1 in dB; NAN when no P2 */
     float p5_db;        /* Mode S: P5 - P6 in dB (>= 0: sidelobe); NAN when no P5 detected */
+    float noise_db;     /* receiver noise floor when the query was heard, dBFS; NAN before it is known */
     float sls_floor_db; /* no P2 (A/C) / P5 (Mode S) above noise + 6 dB: the level read at its slot, dBFS; else NAN */
     float p4_width;     /* us, 0 when none */
     bool s1;            /* whisper-shout S1 pulse 2 us before P1 */
@@ -99,6 +100,7 @@ void modes_describe(const struct interrog *it, char *buf, size_t len);
 int modes_bds(const uint8_t *msg, int *bds1, int *bds2);  /* returns 1 when Comm-B requested */
 int modes_iisi(const uint8_t *msg, int *is_si);          /* UF11 II/SI code */
 int modes_own_code(const struct interrog *it);           /* radar code carried by the message, -1 none */
+bool modes_iis0(const struct interrog *it);              /* roll-call with IIS 0: II0, or an SI radar */
 
 /* Radar codes: II n -> n (0-15), SI n -> 16 + n (SI 1-63). */
 int radar_code_parse(const char *s);                     /* "SI17", "II3"; -1 on error */

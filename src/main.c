@@ -553,6 +553,7 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
         case 'F':
             if (!opt.rx1090) { snprintf(cmd_msg, sizeof(cmd_msg), "autofreeze needs --rx1090 (1090 MHz replies)"); break; }
             autofreeze = !autofreeze;
+            if (autofreeze) frozen = false;     /* back to live: a frozen screen never triggers */
             snprintf(cmd_msg, sizeof(cmd_msg), autofreeze ? "autofreeze armed: freezes on the first burst with matched replies"
                                                          : "autofreeze off");
             manual = false;
@@ -610,7 +611,8 @@ static void usage(void)
 "                         separated by commas or spaces: -A 48af01,LOT3KM,DLH123\n"
 "                         Prefix with cs: to force a callsign that looks like hex\n\n"
 "1090 MHz replies (second receiver with Beast output and 12 MHz timestamps, e.g. dump1090 or readsb):\n"
-"      --rx1090 HOST:PORT read dump1090's Beast output (port 30005, start dump1090 with --net);\n"
+"      --rx1090 [HOST:PORT] read dump1090's Beast output (default localhost:30005; start\n"
+"                         dump1090 with --net);\n"
 "                         roll-called addresses are fed to its Beast input (port 30004)\n"
 "                         and mark answered queries with '*': roll-calls by aircraft address,\n"
 "                         UF11 by the II/SI code in DF11; also supplies callsigns. Mode A/C\n"
@@ -685,7 +687,7 @@ int main(int argc, char **argv)
         { "rollcall-only", 0, 0, 'R' }, { "ac-only", 0, 0, 'C' }, { "no-plain-ac", 0, 0, 'c' },
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
-        { "no-auto-gain", 0, 0, 17 }, { "rx1090", 1, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
+        { "no-auto-gain", 0, 0, 17 }, { "rx1090", 2, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
         { "beep", 0, 0, 22 }, { "no-1090-sync", 0, 0, 23 }, { "adsb-gain", 1, 0, 24 }, { "graph-floor", 1, 0, 26 },
         { "human", 0, 0, 'h' }, { "help", 0, 0, 25 }, { 0, 0, 0, 0 }
     };
@@ -751,7 +753,11 @@ int main(int argc, char **argv)
         }
         case 16: opt.lol_radius = atoi(optarg); break;
         case 17: opt.agc = false; break;
-        case 18: opt.rx1090 = optarg; break;
+        case 18:            /* address optional: --rx1090, --rx1090 HOST:PORT or --rx1090=HOST:PORT */
+            if (optarg) opt.rx1090 = optarg;
+            else if (optind < argc && argv[optind][0] != '-') opt.rx1090 = argv[optind++];
+            else opt.rx1090 = "localhost:30005";
+            break;
         case 19: opt.radar_pos = optarg; break;
         case 20: opt.rx_pos = optarg; break;
         case 'h': bds_human = true; break;
