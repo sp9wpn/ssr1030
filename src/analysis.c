@@ -26,7 +26,6 @@
 #define NBINS       2000
 #define PENDING     65536
 #define OUTQ        65536
-#define BURST_CODE_MIN 2           /* queries with the code needed to name a burst (temporary) */
 #define PAIR_S      0.0003
 
 struct analysis_state AS;
@@ -759,11 +758,8 @@ static void close_burst(void)
     o->open = false;
     int code = -1, bn = 0;
     for (int c = 0; c < NCODES; c++) if (o->votes[c] > bn) { bn = o->votes[c]; code = c; }
-    /* temporary: a code needs BURST_CODE_MIN queries carrying it, so one stray
-     * query of another radar heard during a burst does not name it */
-    if (bn < BURST_CODE_MIN) code = -1;
     /* IIS 0 alone: an II0 interrogator (SI radars send their code in UF11 and DI 3 too) */
-    if (bn == 0 && o->iis0 >= BURST_CODE_MIN) code = 0;
+    if (code < 0 && o->iis0) code = 0;
     bool valid = o->n_raw >= AS.cfg.burst_min;
 
     static struct burst rec;
