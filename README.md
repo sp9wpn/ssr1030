@@ -105,6 +105,7 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
 - **Matching:**
   - roll-calls (UF4/5/20/21) by aircraft address, with a DF4/20 reply to UF4/20 and a DF5/21 reply to UF5/21;
   - UF11 by the II/SI code in the DF11 reply. II/SI codes are reused by distant radars (seen on air: SI37 DF11 replies to a radar with a ~5.0 s rotation), so with the geometry lock a DF11 reply must also arrive within 40 µs of its predicted time.
+  - Delay: with an ADS-B position, only a reply at the predicted delay counts. Without one, the first matched reply sets the aircraft's delay, and for the next 60 s only replies near it count. Other radars interrogate the same aircraft, and their replies land at other delays (seen: one aircraft at 564, 798 and 1604 µs within 9 ms). Under the 1090-window clock "near" is 10 µs plus 2 µs per second since that reply (the aircraft moves), up to 250 µs; otherwise it is 250 µs.
   - Mode A/C replies carry no address or radar code, so A/C queries are never marked.
 - **Clock:** the two receivers have independent clocks, and a reply must be placed to within microseconds of its query. The dashboard line `1090 replies` shows the state. Until the clock is locked, nothing is marked, and queries are held 7 s so the scans that produce the lock can still be marked; the dashboard lags by that much while searching.
   - A reply follows its query by 128 µs (transponder turnaround, counted from the sync phase reversal 4.75 µs after P1) plus the extra path radar → aircraft → receiver.

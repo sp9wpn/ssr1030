@@ -65,7 +65,9 @@
 #define AC_N        4096            /* per-aircraft delays */
 #define WIN_LO      (-0.0003)       /* match window around t + off, s */
 #define WIN_HI      0.0040
-#define AC_TOL      0.00025         /* known aircraft: delay within this of last time */
+#define AC_TOL      0.00025         /* known aircraft: delay within this of last time, */
+#define AC_TOL0     10e-6           /* ... with the clock from 1090 windows: this */
+#define AC_MOVE     2e-6            /* ... plus this per s since (250 m/s there and back: 1.7 us/s) */
 #define AC_AGE      60.0            /* s: a known delay is trusted this long */
 #define LOCK_SPAN   0.01            /* lock search: coarse offset +- this, s (true offset seen 1-2 ms off) */
 #define LOCK_BIN    0.00005
@@ -367,6 +369,14 @@ static double geo_tol(double t)
     if (lock_frames) return GEO_TOL;         /* clock from 1090 windows: only the position age counts */
     double w = GEO_TOL + TOL_GROW * fabs(t - last_match);
     return w < TOL_MAX ? w : TOL_MAX;
+}
+
+/* known aircraft: how far its delay may be from the last one, age s later */
+static double ac_tol(double age)
+{
+    if (!lock_frames) return AC_TOL;         /* the clock itself may have moved this much */
+    double w = AC_TOL0 + AC_MOVE * age;
+    return w < AC_TOL ? w : AC_TOL;
 }
 
 static struct acd *ac_get(uint32_t a, bool create)
@@ -946,14 +956,14 @@ void rx1090_match(struct interrog *x)
         struct acd *a = ac_get(x->addr, false);
         double pd = 0;
         bool geo = lock_geo && predict(a, x->t + off, &pd);
-        double tol = geo_tol(x->t);
         bool known = a && x->t - a->t < AC_AGE;
+        double tol = geo ? geo_tol(x->t) : known ? ac_tol(x->t - a->t) : 0;
         /* with a position: the reply at the predicted delay, nothing else.
-         * Known aircraft: the reply at its usual delay; otherwise (or when
-         * that delay no longer fits) the earliest one, and learn the delay */
+         * Known aircraft: the reply at its usual delay, nothing else (other
+         * radars' queries draw replies at other delays). Otherwise the
+         * earliest one, and learn the delay */
         struct reply *best = NULL, *first = NULL;
         double bd = 0, fd = 0;
-        int ncand = 0;
         for (; j < rp_n; j++) {
             struct reply *y = &rp[j % RP_N];
             if (y->r > hi) break;
@@ -961,10 +971,9 @@ void rx1090_match(struct interrog *x)
             double d = y->r - x->t - off;
             if (lock_frames && d < TURNAROUND - 5e-6) continue;     /* exact clock: nothing before the turnaround */
             if (!first) { first = y; fd = d; }
-            ncand++;
             if (geo) {
                 if (fabs(d - pd) < tol && (!best || fabs(d - pd) < fabs(bd - pd))) { best = y; bd = d; }
-            } else if (known && fabs(d - a->delay) < AC_TOL && (!best || fabs(d - a->delay) < fabs(bd - a->delay))) { best = y; bd = d; }
+            } else if (known && fabs(d - a->delay) < tol && (!best || fabs(d - a->delay) < fabs(bd - a->delay))) { best = y; bd = d; }
         }
         if (geo) {
             if (!best) { if (first) misfits++; return; }   /* replies there, none at the predicted time */
@@ -973,12 +982,11 @@ void rx1090_match(struct interrog *x)
             x->reply_res_us = (float)((bd - pd) * 1e6);
             res[nres++ % RES_N] = bd - pd;
         } else if (best) { clock_update(x->t, bd - a->delay); misfits = 0; }
-        else if (first) {
-            best = first; bd = fd;
-            /* a single candidate is unambiguous: the clock moved more than the tolerance */
-            if (known && ncand == 1) clock_update(x->t, bd - a->delay);
-            else if (known) misfits++;      /* replies there, none at this aircraft's delay */
-        } else return;                      /* not heard: says nothing about the lock */
+        else if (known) {                   /* replies there, none at this aircraft's delay */
+            if (first) misfits++;
+            return;
+        } else if (first) { best = first; bd = fd; }
+        else return;                        /* not heard: says nothing about the lock */
         best->used = true;
         x->answered = true;
         x->reply_df = best->df;
@@ -994,10 +1002,13 @@ void rx1090_match(struct interrog *x)
             if (y->r > hi) break;
             if (y->used || y->df != 11 || y->code != code) continue;
             double d = y->r - x->t - off, pd;
-            bool pos = lock_geo && predict(ac_get(y->addr, false), y->r, &pd);
+            struct acd *a = ac_get(y->addr, false);
+            bool pos = lock_geo && predict(a, y->r, &pd);
             /* II/SI codes are reused by distant radars: with a position, only a
-             * reply at the predicted time answers this radar's all-call */
+             * reply at the predicted time answers this radar's all-call; from a
+             * known aircraft, only one at its usual delay */
             if (pos && fabs(d - pd) >= geo_tol(x->t)) continue;
+            if (!pos && a && x->t - a->t < AC_AGE && fabs(d - a->delay) >= ac_tol(x->t - a->t)) continue;
             y->used = true;
             if (!x->nreplies || d * 1e6 < x->reply_us) x->reply_us = (float)(d * 1e6);
             if (pos) {
