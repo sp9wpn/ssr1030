@@ -7,13 +7,18 @@ LDLIBS  = $(HACKRF_LIBS) -lpthread -lm
 SRC = src/main.c src/demod.c src/modes.c src/analysis.c src/display.c src/output.c src/adsb.c src/rx1090.c src/geo.c
 OBJ = $(SRC:.c=.o)
 
+all: ssr1030 bds_logger
+
 ssr1030: $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDLIBS)
 
 src/%.o: src/%.c src/ssr1030.h src/analysis.h
 	$(CC) $(CFLAGS) $(HACKRF_CFLAGS) -c -o $@ $<
 
-clean:
-	rm -f ssr1030 src/*.o
+bds_logger: src/bds_logger.c
+	$(CC) $(CFLAGS) -o $@ $< -lm
 
-.PHONY: clean
+clean:
+	rm -f ssr1030 bds_logger src/*.o
+
+.PHONY: all clean

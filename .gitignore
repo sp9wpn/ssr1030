@@ -1,5 +1,6 @@
 # build output
 ssr1030
+bds_logger
 src/*.o
 
 # recordings and logs (IQ files are 32 MB/s)

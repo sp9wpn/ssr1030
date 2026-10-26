@@ -11,6 +11,7 @@ It is based on [dump1030](https://github.com/Fuziih/dump1030).
 - **Sidelobe detection:** Interrogations marked as sidelobes locally using P2/P5 pulses (note: aircraft might interprete them differently)
 - **Callsigns:** from short ADS-B windows on 1090 MHz, from [adsb.lol](https://adsb.lol), or from dump1090.
 - **Answered or not:** with a second 1090 MHz receiver that gives Beast output (for example dump1090 or readsb), matches 1090 MHz replies to the interrogations, marks answered ones and decodes what the aircraft replied (altitude, squawk, BDS 2,0/4,0/5,0/6,0).
+- **bds_logger:** a separate small tool that reads only a Beast stream and prints the BDS 5,0 and 6,0 replies of ADS-B aircraft (track, speeds, heading, Mach, vertical rates) with callsign and AMSL altitude. No HackRF needed.
 - **Live dashboard** with automatic gain, filters by radar, aircraft and interrogation type, and a burst chart. CSV log, IQ recording and replay.
 
 ![Dashboard](docs/dashboard.png)
@@ -25,7 +26,8 @@ It is based on [dump1030](https://github.com/Fuziih/dump1030).
 
 ```
 sudo apt install libhackrf-dev     # build header; runtime libhackrf0 is usually present
-make
+make                               # ssr1030 and bds_logger
+make bds_logger                    # bds_logger only (no libhackrf needed)
 ```
 
 ## Run
@@ -367,6 +369,37 @@ The interleaving statistics use the same tokens, without the target numbers.
   - `answered` is 1 when a reply was heard and 0 when none was heard. It is `-` when the query could not be checked: no `--rx1090`, clock not locked yet, or a query type that is not matched.
   - `reply_us` is the reply delay after the query in µs: 128 µs turnaround plus the extra path. It carries a small constant error from the clock lock.
   - `replies` is the number of DF11 replies for UF11, and 1 for a roll-call.
+
+## bds_logger
+
+A separate program: it reads a Beast stream (dump1090, readsb, …) and prints the Comm-B replies (DF20/21) that hold BDS 5,0 (track and turn) or BDS 6,0 (heading and speed), one line each. It needs no HackRF and no 1030 MHz receiver.
+
+```
+./bds_logger                       # localhost:30005
+./bds_logger otherhost:30005 --qnh 1018 -v
+./bds_logger --max-alt 10000          # only aircraft at or below 10000 ft pressure altitude
+./bds_logger -A 48af10,LOT3TD         # only these aircraft
+```
+
+```
+22:21:07.981  48e973  LOT3TD         2361 ft     BDS5,0  roll  -0.4°  track 331.9°  GS 172 kt  TAS 184 kt  turn +0.03°/s
+22:21:07.988  48e973  LOT3TD         2361 ft     BDS6,0  hdg 323.1°  IAS 181 kt  M0.284  baro  -928 ft/min  inertial  -896 ft/min
+```
+
+- **Which register:** a Comm-B reply does not say which register it holds (that is in the interrogation, which a 1090 receiver does not hear), so it is inferred from the content, as in pyModeS:
+  - every field whose status bit is clear must be all zeros, and values must be in range (roll within ±50°, speeds, Mach, vertical rates);
+  - the aircraft must have sent ADS-B (DF17) in the last minute, and the reply must agree with its ADS-B velocity from the last 30 s: BDS 5,0 ground speed within 25 kt and track within 12°; BDS 6,0 heading within 40° of the track (wind), vertical rate within 1500 ft/min, IAS and Mach consistent with the altitude, and the true airspeed within 200 kt of the ground speed;
+  - a reply that fits both registers is printed twice, once decoded as each, both marked `?` (`BDS5,0?`, `BDS6,0?`).
+  - The aircraft address of a DF20/21 reply is its parity (AP) field.
+- **Repeats:** an aircraft interrogated by several radars sends the same content several times; every reply is printed.
+- **Altitude:** the last pressure altitude (DF20 reply, DF0/4, ADS-B), converted to AMSL with the QNH (ISA pressure-height relation).
+  - `--qnh HPA` sets the QNH.
+  - Otherwise it comes from BDS 4,0 replies (barometric setting) of aircraft below 4000 ft whose setting is not standard (1013.2), as the median of the last 16 within 30 minutes. Each change is noted on stderr (`# QNH 1021.0 hPa (from BDS 4,0 of …)`).
+  - Until a QNH is known, the pressure altitude is shown with `STD`.
+- **Time:** the receiver's 12 MHz timestamps, placed on the computer's clock, so the times are not bunched by dump1090's network batching.
+- `--max-alt FT`: hides aircraft above this pressure altitude (standard 1013.25, not AMSL), and aircraft with no altitude in the last minute.
+- `-A LIST`: only these aircraft, by hex address or callsign, separated by commas (`-A 48af10,LOT3TD`, case does not matter). A callsign matches once the aircraft's ADS-B identification has been heard.
+- `-v`: counts every minute on stderr (Comm-B replies, unknown aircraft, BDS 5,0, BDS 6,0, above `--max-alt`, other aircraft (`-A`), ambiguous (both), neither).
 
 ## License
 
