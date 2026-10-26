@@ -82,7 +82,8 @@ int tok_group(uint16_t tok)
 
 const char *group_label(int g)
 {
-    static const char *const reg[G_COUNT] = { [G_CAL] = "b20", [G_SETALT] = "b40", [G_TRK] = "b50", [G_HDGSPD] = "b60" };
+    static const char *const reg[G_COUNT] = { [G_SALT] = "UF4", [G_SSQK] = "UF5", [G_CAL] = "b20", [G_SETALT] = "b40",
+                                              [G_TRK] = "b50", [G_HDGSPD] = "b60" };
     return !bds_human && reg[g] ? reg[g] : group_labels[g];
 }
 
@@ -915,7 +916,8 @@ void analysis_print_summary(FILE *f)
     if (AS.nhist) {
         fprintf(f, "  (* = burst touched an ADS-B window; excluded from per-burst statistics)\n");
         fprintf(f, "  tokens: A C A/C-only all-call | AA CC plain Mode A/C | As Cs A/C/S all-call | S UF11 all-call\n"
-                   "          alt UF4 altitude | sqk UF5 Mode A code | S-msg Comm-A (UF20/21) | S-elm UF24\n");
+                   "          %s | S-msg Comm-A (UF20/21) | S-elm UF24\n",
+                bds_human ? "alt UF4 altitude | sqk UF5 Mode A code" : "UF4 altitude roll-call | UF5 Mode A code roll-call");
         if (bds_human)
             fprintf(f, "          Comm-B: acid 2,0 aircraft identification (callsign) | selAlt 4,0 selected alt | trk 5,0 track/turn |\n"
                        "          hdgSpd 6,0 heading/speed | cap 1,0 | gicb 1,7 | pos 5,1/5,2 | met 4,4 | S-bXY other\n");

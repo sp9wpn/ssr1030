@@ -254,7 +254,8 @@ const char *seq_token_str(uint16_t t, char *buf, size_t len)
 {
     int k = t & 31, x = t >> 5;
     if (!x) {
-        snprintf(buf, len, "%s", kind_token(k));
+        /* plain roll-calls: UF4 / UF5 (alt / sqk with -h) */
+        snprintf(buf, len, "%s", !bds_human && k == K_UF4 ? "UF4" : !bds_human && k == K_UF5 ? "UF5" : kind_token(k));
         return buf;
     }
     if (!bds_human) {                       /* uplink format and register: UF4b50 */

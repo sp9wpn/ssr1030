@@ -100,7 +100,7 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
 
 - **Marking:** an answered query gets `*`:
   - in the recent list and `-L` output, after the `B` flag;
-  - in burst sequences, for example `alt/1*`;
+  - in burst sequences, for example `UF4/1*`;
   - in the burst chart, after the target.
 - **Matching:**
   - roll-calls (UF4/5/20/21) by aircraft address, with a DF4/20 reply to UF4/20 and a DF5/21 reply to UF5/21;
@@ -130,9 +130,9 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - DF20/21: also the register the query asked for: BDS 2,0 callsign; 4,0 selected altitude (MCP/FMS) and QNH; 5,0 roll, track, ground speed, turn rate, TAS; 6,0 heading, IAS, Mach, vertical rates.
   - The header shows `replies N`.
   ```
-      +22.78 ms     +1.69°  alt          RYR48SC*      -16.4 ███████████████████████
+      +22.78 ms     +1.69°  UF4          RYR48SC*      -16.4 ███████████████████████
                             ↳ DF4   131.6 µs  res +0.1  2.2 or 5.8 NM (ADS-B 2.3 NM)  alt 8950 ft
-      +34.33 ms     +2.53°  sqk          RYR48SC*      -16.9 ██████████████████████
+      +34.33 ms     +2.53°  UF5          RYR48SC*      -16.9 ██████████████████████
                             ↳ DF5   131.4 µs  res -0.1  2.4 or 5.6 NM (ADS-B 2.3 NM)  squawk 6162
   ```
 - **Range:** with `--radar-pos`/`--rx-pos` and a position-based lock, each reply row also shows the estimated radar→aircraft distance in NM.
@@ -268,7 +268,7 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 
 ```
    -262.58 ms    -19.50°  AA                     -18.5 ░░░░░░░           P2
-    -36.42 ms     -2.70°  selAlt       4a2182     -9.1 ████████████P5█████████████████
+    -36.42 ms     -2.70°  UF4b40       4a2182     -9.1 ████████████P5█████████████████
     -23.35 ms     -1.73°  A                        1.2 ██P2█████████████████████████████████████████████████████
     +47.23 ms     +3.51°  AA                     -20.1 ▒▒▒
 ```
@@ -280,7 +280,7 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
   - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
   - `▒` other weak query that is not SLS
 - **SLS pulses:** `P2` (A/C) and `P5` (Mode S) are drawn at the column matching their level. They appear inside the bar when weaker than P1, and after the bar end when stronger, which is what suppresses the transponder.
-  - No pulse above noise + 6 dB: a dot `·` marks the level read at the slot where P2 (A/C) or P5 (Mode S) would be. That reading is noise (or a pulse too weak to count), so it shows how far below the bar a missing pulse is. Mode S has no P2 to look for (it is part of the preamble), so a Mode S row without `P5` gets the P5-slot dot.
+  - The marker is always drawn at the level read at the P2 (A/C) or P5 (Mode S) slot, also when no pulse stands out of the noise: a pulse at noise level and no pulse at all give the same reading, so the chart does not tell them apart. (For the SLS flag and the statistics, a pulse still counts only from noise + 6 dB.) Mode S has no P2 to look for (it is part of the preamble).
   - P5 is measured at the sync phase reversal. P6 flips phase there but P5 does not.
   - Across ±0.35 µs around the expected sync, the signal is fitted as a constant P5 plus a P6 that changes sign once. The best split point is the reversal, and P5 = |mean before + mean after|/2, P6 = |mean before − mean after|/2.
   - This finds the reversal even when it falls between samples, and it also works when a strong P5 masks the sync.
@@ -311,8 +311,8 @@ They are left out of all radar analysis.
 - **Burst table columns** (each interrogation counted once, so they add up to `n`):
   - `AA/CC`, `A/C`, `ACSall`: plain Mode A/C, A/C-only all-calls, A/C/S all-calls.
   - `UF11-all`: UF11 all-calls (token `S` in sequences).
-  - `alt`, `sqk`: UF4 and UF5 roll-calls without a Comm-B request.
-  - `acid`, `selAlt`, `trk`, `hdgSpd`: Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
+  - `UF4`, `UF5` (`alt`, `sqk` with `-h`): UF4 and UF5 roll-calls without a Comm-B request.
+  - `b20`, `b40`, `b50`, `b60` (`acid`, `selAlt`, `trk`, `hdgSpd` with `-h`): Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
   - `oBDS`: any other BDS.
   - `msg`: Comm-A without a request.
   - `other`: UF24, UF19 and the rest.
@@ -325,7 +325,7 @@ They are left out of all radar analysis.
 | `A` `C` | A/C-only all-call (short P4) |
 | `As` `Cs` | A/C/S all-call (long P4) |
 | `S` | UF11 Mode S all-call (acquisition) |
-| `alt` / `sqk` | UF4 altitude / UF5 Mode A code roll-call, no Comm-B |
+| `UF4` / `UF5` | UF4 altitude / UF5 Mode A code roll-call, no Comm-B (`alt` / `sqk` with `-h`) |
 | `UF4b50` `UF5b20` `UF20b60` … | Roll-call requesting a Comm-B register: uplink format, then `b` and the BDS number (default) |
 | `acid` `selAlt` `trk` `hdgSpd` | With `-h`: roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
 | `cap` `gicb` `pos` `met` `ra` `aicb` … | With `-h`: BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
@@ -334,7 +334,7 @@ They are left out of all radar analysis.
 | `S-sls` | Mode S sidelobe (P5 ≥ P6) whose bits could not be recovered. Normally sidelobe Mode S is fully decoded and shown with its own token and the SLS flag |
 | `S-grb` | Mode S with no sync reversal and no P5 (garbled) |
 
-Roll-calls carry the number of their target, for example `alt/1` or `UF4b40/2x2` (`selAlt/2x2` with `-h`).
+Roll-calls carry the number of their target, for example `UF4/1` or `UF4b40/2x2` (`alt/1`, `selAlt/2x2` with `-h`).
 With `-h` the burst table columns and the Comm-B BDS table also use the short names; without it they show `b20 b40 b50 b60` and the register number.
 Targets are listed under the sequence, numbered in alphabetical order of their callsign or hex: `targets: 1/452124 2/DLH123`.
 

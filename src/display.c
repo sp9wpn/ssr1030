@@ -256,16 +256,17 @@ static void draw_graph(int cols, int rows)
         float mv = NAN;
         if (!isnan(g->p2)) { mk = "P2"; mv = g->p2; }
         else if (!isnan(g->p5)) { mk = "P5"; mv = g->p5; }
-        int mpos = -1, dpos = -1;
+        else if (!isnan(g->sq)) {
+            /* no pulse above noise + 6 dB: the level read at its slot. A pulse at noise
+             * level and no pulse read the same, so it is drawn the same way */
+            mk = kind_is_modes(g->tok & 31) ? "P5" : "P2";
+            mv = g->sq;
+        }
+        int mpos = -1;
         if (mk) {
             mpos = (int)lroundf((mv - ybot) / (ytop - ybot) * W);
             if (mpos < 2) mpos = 2;
             if (mpos > W) mpos = W;
-        } else if (!isnan(g->sq)) {
-            /* no P2/P5 above noise + 6 dB: a dot at the level read where it would be */
-            dpos = (int)lroundf((g->sq - ybot) / (ytop - ybot) * W) - 1;
-            if (dpos < 0) dpos = 0;
-            if (dpos > W - 1) dpos = W - 1;
         }
         /* fixed-width fields: query 12 (longest token, e.g. S-msg/hdgSpd), target 8 (callsign or hex),
          * "*" when it was answered on 1090, "sls" when the query reached us through a sidelobe */
@@ -275,11 +276,8 @@ static void draw_graph(int cols, int rows)
                ts, tg, g->ans ? "*" : " ", g->cls == GP_SIDE ? "sls" : "", g->amp);
         fputs(R, stdout);
         int end = mpos > len ? mpos : len;
-        if (dpos >= end) end = dpos + 1;
         for (int k = 0; k < end; k++) {
-            if (k == dpos) {
-                printf(k < len ? R "\033[7;31m\u00b7" R : R RED "\u00b7" R);
-            } else if (mk && k >= mpos - 2 && k < mpos) {
+            if (mk && k >= mpos - 2 && k < mpos) {
                 /* inside the bar: inverse, beyond it: plain bold */
                 printf(k < len ? R "\033[1;7;31m%c" R : R B RED "%c" R, mk[k - (mpos - 2)]);
             } else if (k < len) {
@@ -583,8 +581,8 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     if (AS.nhist > 0) {
         struct burst *b = &AS.hist[(AS.nhist - 1) % BURST_HIST];
         printf(B "Last burst #%d sequence" R DIM
-               "  (A C A/C-only all-call, AA CC plain A/C, S UF11 all-call, alt/sqk UF4/5, %s, S-msg Comm-A, xN repeat)" R EL,
-               b->id, bds_human ? "acid/selAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0" : "UF4b50 UF4 asking BDS 5,0");
+               "  (A C A/C-only all-call, AA CC plain A/C, S UF11 all-call, %s, %s, S-msg Comm-A, xN repeat)" R EL,
+               b->id, bds_human ? "alt/sqk UF4/5" : "UF4/UF5 roll-call", bds_human ? "acid/selAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0" : "UF4b50 UF4 asking BDS 5,0");
         print_seq(b, cols, 4);
     } else fputs(EL EL EL, stdout);
 
