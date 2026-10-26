@@ -8,7 +8,7 @@ It is based on [dump1030](https://github.com/Fuziih/dump1030).
 - **Full Mode S uplink decoding** at 16 MS/s: UF4/5/11/20/21/24, aircraft address, II/SI code and the requested Comm-B register (BDS).
 - **Mode A/C and intermode:** plain Mode A/C, A/C-only and A/C/S all-calls; P2/P5 sidelobe suppression is measured for every query.
 - **Radar analysis:** main-beam bursts, rotation period, dwell time, interrogation sequence within the beam, several radars told apart by their codes.
-- **Sidelobe roll-calls:** Mode S heard through the radar's sidelobes, aimed at aircraft in other directions.
+- **Sidelobe detection:** Interrogations marked as sidelobes locally using P2/P5 pulses (note: aircraft might interprete them differently)
 - **Callsigns:** from short ADS-B windows on 1090 MHz, from [adsb.lol](https://adsb.lol), or from dump1090.
 - **Answered or not:** with a second 1090 MHz receiver that gives Beast output (for example dump1090 or readsb), matches 1090 MHz replies to the interrogations, marks answered ones and decodes what the aircraft replied (altitude, squawk, BDS 2,0/4,0/5,0/6,0).
 - **Live dashboard** with automatic gain, filters by radar, aircraft and interrogation type, and a burst chart. CSV log, IQ recording and replay.
@@ -38,10 +38,10 @@ make
 ./ssr1030 -f capture.iq            # replay a recording, print summary
 ./ssr1030 -f capture.iq -d         # replay with the dashboard
 ./ssr1030 -L                       # scrolling one line per interrogation
-./ssr1030 -r SI17                  # only radar SI17
-./ssr1030 -r SI17 -S               # only radar SI17, Mode S interrogations only
+./ssr1030 -r SI37                  # only radar SI37
+./ssr1030 -r SI37 -S               # only radar SI37, Mode S interrogations only
 ./ssr1030 -B                       # learn callsigns from ADS-B (1090) windows (kept in memory)
-./ssr1030 -r SI17 -R               # only roll-calls of SI17 (no all-calls)
+./ssr1030 -r SI37 -R               # only roll-calls of SI37 (no all-calls)
 ./ssr1030 -C                       # only plain Mode A/C (older SSR radars)
 ./ssr1030 -A 48af01                # only interrogations addressed to one aircraft
 ./ssr1030 -A 48af01,LOT3KM,DLH123  # ... or to any of several
@@ -53,14 +53,15 @@ make
 
 These apply to statistics, bursts, the log and `--list`. TCAS stays a separate statistic.
 
-- `-r, --radar SI17|II3`: keeps one radar.
+- `-r, --radar SI37|II3`: keeps one radar.
   - Mode S interrogations carry the code: UF11 has II/SI, and UF4/5/20/21 have SIS (DI=3) or IIS (DI=0/1/7).
   - All-call interrogations are attributed through the main-beam burst they belong to. A burst gets the majority code of the interrogations inside it.
   - Plain Mode A/C (no P4) is never part of a burst that has a Mode S code, and is never attributed to it: a Mode S radar sends A/C-only all-calls instead, so plain A/C comes from another radar.
   - Outside bursts, an all-call is attributed if a UF11 was sent less than 300 µs before it.
   - Anything left unattributed is dropped.
 - `-S, --modes-only`: drops plain Mode A/C and intermode (A/C-only and A/C/S all-calls).
-- `-C, --ac-only`: keeps only plain Mode A/C (tokens `AA`/`CC`, no P4), as sent by older SSR radars. It drops Mode S and all intermode all-calls (`A`/`C`, `As`/`Cs`). It cannot be combined with `-S`, `-R` or `-A`.
+- `-C, --ac-only`: keeps only plain Mode A/C (tokens `AA`/`CC`, no P4), as sent by older SSR radars. It drops Mode S and all intermode all-calls (`A`/`C`, `As`/`Cs`). It cannot be combined with `-S`, `-R`, `-A` or `-c`. The key `C` toggles it at run time.
+- `-c, --no-plain-ac`: drops plain Mode A/C (tokens `AA`/`CC`, no P4). Mode S and intermode all-calls stay. The key `c` toggles it at run time.
 - `-R, --rollcall-only`: keeps only interrogations addressed to an aircraft (UF4/5/20/21/24/19). It drops UF11 `S`, all intermode all-calls and plain Mode A/C.
 - `-A, --aircraft LIST`: keeps only interrogations addressed to the listed aircraft (UF0/4/5/16/19/20/21/24).
   - `LIST` holds up to 16 entries separated by commas, spaces or semicolons, for example `-A 48af01,LOT3KM,DLH123`.
@@ -87,7 +88,7 @@ With the radar and antenna positions, the clock locks from ADS-B positions (see 
 ./ssr1030 --rx1090 localhost:30005 --radar-pos RADAR --rx-pos HOME
 ```
 
-The names come from `positions.csv` (in the current directory, else next to the program). It is in `.gitignore`, so your positions stay out of the repository. One `NAME,LAT,LON[,ALT_M]` line per site, in decimal degrees and metres; lines starting with `#` are skipped, and names are not case-sensitive:
+The names come from `positions.csv` (in the current directory, else next to the program); `--adsblol` accepts them too. It is in `.gitignore`, so your positions stay out of the repository. One `NAME,LAT,LON[,ALT_M]` line per site, in decimal degrees and metres; lines starting with `#` are skipped, and names are not case-sensitive:
 
 ```
 # name,lat,lon,alt_m
@@ -103,7 +104,7 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - in the burst chart, after the target.
 - **Matching:**
   - roll-calls (UF4/5/20/21) by aircraft address, with a DF4/20 reply to UF4/20 and a DF5/21 reply to UF5/21;
-  - UF11 by the II/SI code in the DF11 reply. II/SI codes are reused by distant radars (seen on air: SI17 DF11 replies to a radar with a ~5.0 s rotation), so with the geometry lock a DF11 reply must also arrive within 40 µs of its predicted time.
+  - UF11 by the II/SI code in the DF11 reply. II/SI codes are reused by distant radars (seen on air: SI37 DF11 replies to a radar with a ~5.0 s rotation), so with the geometry lock a DF11 reply must also arrive within 40 µs of its predicted time.
   - Mode A/C replies carry no address or radar code, so A/C queries are never marked.
 - **Clock:** the two receivers have independent clocks, and a reply must be placed to within microseconds of its query. The dashboard line `1090 replies` shows the state. Until the clock is locked, nothing is marked, and queries are held 7 s so the scans that produce the lock can still be marked; the dashboard lags by that much while searching.
   - A reply follows its query by 128 µs (transponder turnaround, counted from the sync phase reversal 4.75 µs after P1) plus the extra path radar → aircraft → receiver.
@@ -153,7 +154,7 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - DF17/18 identification (CRC must be zero).
   - DF11 replies (address presence only).
   - DF20/21 Comm-B BDS 2,0, accepted only for addresses already known.
-- **Preload:** `--adsblol LAT,LON` fills the table at startup with every aircraft within `--adsblol-radius` NM (default 150, API max 250) of that position, from the public [adsb.lol](https://api.adsb.lol) API (`/v2/lat/…/lon/…/dist/…`, via `curl`, no key needed). It sends the coordinates to adsb.lol and works with or without `-B` and in `--file` mode. If the request fails, the run continues without it.
+- **Preload:** `--adsblol LAT,LON` (or a name from `positions.csv`, see **1090 MHz replies**) fills the table at startup with every aircraft within `--adsblol-radius` NM (default 150, API max 250) of that position, from the public [adsb.lol](https://api.adsb.lol) API (`/v2/lat/…/lon/…/dist/…`, via `curl`, no key needed). It sends the coordinates to adsb.lol and works with or without `-B` and in `--file` mode. If the request fails, the run continues without it.
 - **Table:** kept in memory only. Optionally, `--adsb-db PATH` loads it at start and saves it after each window (for example to a file in `/tmp`). That also lets `--file` replays show callsigns.
 
 Dashboard keys:
@@ -169,6 +170,8 @@ Dashboard keys:
 | `a` | Aircraft filter: type hex addresses or callsigns (list separated by commas or spaces), then `Enter` |
 | `S` | Mode S only on/off (same as `-S`) |
 | `R` | Roll-calls only on/off (same as `-R`) |
+| `c` | Plain Mode A/C (`AA`/`CC`) off/on (same as `-c`). Turning it off also ends `-C` |
+| `C` | Plain Mode A/C only on/off (same as `-C`). Turning it on also ends `-S`, `-R`, `-c` and the aircraft filter, which would leave nothing; `S`, `R` or an aircraft filter end it |
 | `b` | Burst graph screen on/off (see below) |
 | `space` | Freeze the screen on/off: data collection continues. On the burst chart the shown burst is pinned and stays scrollable |
 | `F` | With `--rx1090`: autofreeze, freeze on the first burst with matched 1090 replies and show it in the burst chart |
@@ -270,13 +273,14 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
     +47.23 ms     +3.51°  AA                     -20.1 ▒▒▒
 ```
 
-- **Scale:** fixed, from −40 dBFS (just below the noise floor) to +3 dBFS (where I/Q clipping starts), so bar lengths compare between bursts. The header shows the gain each burst was received with.
+- **Scale:** fixed, from −45 dBFS (below the noise floor; `--graph-floor DB` changes it) to +3 dBFS (where I/Q clipping starts), so bar lengths compare between bursts. The header shows the gain each burst was received with.
 - **Each row:** time relative to the middle of the beam pass, antenna angle from the beam middle (from the radar's rotation period, shown in the header; `-` while it is unknown), amplitude = P6 for Mode S and P1 for A/C, query token (12 characters), target (8 characters: callsign when known, else hex address), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
 - **Bar character:**
   - `█` in-beam query
   - `░` sidelobe (SLS: P2 ≥ P1, or Mode S without sync)
   - `▒` other weak query that is not SLS
 - **SLS pulses:** `P2` (A/C) and `P5` (Mode S) are drawn at the column matching their level. They appear inside the bar when weaker than P1, and after the bar end when stronger, which is what suppresses the transponder.
+  - No pulse above noise + 6 dB: a dot `·` marks the level read at the slot where P2 (A/C) or P5 (Mode S) would be. That reading is noise (or a pulse too weak to count), so it shows how far below the bar a missing pulse is. Mode S has no P2 to look for (it is part of the preamble), so a Mode S row without `P5` gets the P5-slot dot.
   - P5 is measured at the sync phase reversal. P6 flips phase there but P5 does not.
   - Across ±0.35 µs around the expected sync, the signal is fitted as a constant P5 plus a P6 that changes sign once. The best split point is the reversal, and P5 = |mean before + mean after|/2, P6 = |mean before − mean after|/2.
   - This finds the reversal even when it falls between samples, and it also works when a strong P5 masks the sync.
@@ -322,14 +326,16 @@ They are left out of all radar analysis.
 | `As` `Cs` | A/C/S all-call (long P4) |
 | `S` | UF11 Mode S all-call (acquisition) |
 | `alt` / `sqk` | UF4 altitude / UF5 Mode A code roll-call, no Comm-B |
-| `acid` `selAlt` `trk` `hdgSpd` | Roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
-| `cap` `gicb` `pos` `met` `ra` `aicb` … | BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
-| `S-msg` | Comm-A UF20/21 (`S-msg/hdgSpd` = also requests BDS 6,0) |
+| `UF4b50` `UF5b20` `UF20b60` … | Roll-call requesting a Comm-B register: uplink format, then `b` and the BDS number (default) |
+| `acid` `selAlt` `trk` `hdgSpd` | With `-h`: roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
+| `cap` `gicb` `pos` `met` `ra` `aicb` … | With `-h`: BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
+| `S-msg` | Comm-A UF20/21 without a Comm-B request (with `-h`, `S-msg/hdgSpd` = Comm-A also requesting BDS 6,0) |
 | `S-elm` `S-mil` | UF24 ELM, UF19 |
 | `S-sls` | Mode S sidelobe (P5 ≥ P6) whose bits could not be recovered. Normally sidelobe Mode S is fully decoded and shown with its own token and the SLS flag |
 | `S-grb` | Mode S with no sync reversal and no P5 (garbled) |
 
-Roll-calls carry the number of their target, for example `alt/1` or `selAlt/2x2`.
+Roll-calls carry the number of their target, for example `alt/1` or `UF4b40/2x2` (`selAlt/2x2` with `-h`).
+With `-h` the burst table columns and the Comm-B BDS table also use the short names; without it they show `b20 b40 b50 b60` and the register number.
 Targets are listed under the sequence, numbered in alphabetical order of their callsign or hex: `targets: 1/452124 2/DLH123`.
 
 The interleaving statistics use the same tokens, without the target numbers.

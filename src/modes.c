@@ -248,6 +248,8 @@ uint16_t seq_token(const struct interrog *it)
     return t;
 }
 
+bool bds_human;
+
 const char *seq_token_str(uint16_t t, char *buf, size_t len)
 {
     int k = t & 31, x = t >> 5;
@@ -255,7 +257,12 @@ const char *seq_token_str(uint16_t t, char *buf, size_t len)
         snprintf(buf, len, "%s", kind_token(k));
         return buf;
     }
-    /* named registers are shown bare (call, selAlt, hdgSpd...), others as S-bXY */
+    if (!bds_human) {                       /* uplink format and register: UF4b50 */
+        int uf = k == K_UF4 ? 4 : k == K_UF5 ? 5 : k == K_UF20 ? 20 : 21;
+        snprintf(buf, len, "UF%db%X%X", uf, (x - 1) >> 4, (x - 1) & 15);
+        return buf;
+    }
+    /* -h: named registers are shown bare (acid, selAlt, hdgSpd...), others as S-bXY */
     char hx[8];
     const char *a = bds_abbrev(x - 1);
     bool named = a != NULL;

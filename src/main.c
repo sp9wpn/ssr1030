@@ -370,6 +370,7 @@ static void build_filters(char *buf, size_t n)
     }
     if (opt.acfg.modes_only) o += snprintf(buf + o, n - o, "Mode S only  ");
     if (opt.acfg.ac_only) o += snprintf(buf + o, n - o, "plain A/C only  ");
+    if (opt.acfg.no_ac) o += snprintf(buf + o, n - o, "no plain A/C  ");
     if (opt.acfg.rollcall_only) o += snprintf(buf + o, n - o, "roll-calls only  ");
     if (opt.acfg.nac) {
         char l[160];
@@ -424,7 +425,8 @@ static void apply_input(struct run_info *ri, char kind, char *arg)
         }
         char l[120];
         ac_list_str(&opt.acfg, true, l, sizeof(l));
-        snprintf(m, sizeof(m), "aircraft filter %s", l);
+        snprintf(m, sizeof(m), "aircraft filter %s%s", l, opt.acfg.ac_only ? " (plain A/C only OFF)" : "");
+        opt.acfg.ac_only = false;                 /* plain A/C carries no address */
         apply_filters(ri, m);
     }
 }
@@ -508,11 +510,36 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
         case 'g': case 'G': opt.agc = !opt.agc; agc_low_count = 0; manual = false; break;
         case 'S':
             opt.acfg.modes_only = !opt.acfg.modes_only;
+            if (opt.acfg.modes_only) opt.acfg.ac_only = false;   /* with plain-A/C-only nothing would pass */
             apply_filters(ri, opt.acfg.modes_only ? "Mode S only ON (non-Mode S dropped)" : "Mode S only OFF");
             manual = false;
             break;
+        case 'c':
+            opt.acfg.no_ac = !opt.acfg.no_ac;
+            if (opt.acfg.no_ac && opt.acfg.ac_only) opt.acfg.ac_only = false;   /* together nothing would pass */
+            apply_filters(ri, opt.acfg.no_ac ? "plain A/C (AA/CC) dropped" : "plain A/C (AA/CC) kept again");
+            manual = false;
+            break;
+        case 'C': {
+            opt.acfg.ac_only = !opt.acfg.ac_only;
+            char m[160] = "plain A/C only OFF";
+            if (opt.acfg.ac_only) {
+                /* Mode S only, roll-calls only, no plain A/C or an aircraft filter would leave nothing */
+                int o = snprintf(m, sizeof(m), "plain A/C only ON (Mode S and intermode dropped)");
+                if (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.no_ac || opt.acfg.nac)
+                    o += snprintf(m + o, sizeof(m) - o, "; off:%s%s%s%s", opt.acfg.modes_only ? " Mode S only" : "",
+                                  opt.acfg.rollcall_only ? " roll-calls only" : "", opt.acfg.no_ac ? " no plain A/C" : "",
+                                  opt.acfg.nac ? " aircraft filter" : "");
+                opt.acfg.modes_only = opt.acfg.rollcall_only = opt.acfg.no_ac = false;
+                opt.acfg.nac = 0;
+            }
+            apply_filters(ri, m);
+            manual = false;
+            break;
+        }
         case 'R':
             opt.acfg.rollcall_only = !opt.acfg.rollcall_only;
+            if (opt.acfg.rollcall_only) opt.acfg.ac_only = false;
             apply_filters(ri, opt.acfg.rollcall_only ? "roll-calls only ON (all-calls dropped)" : "roll-calls only OFF");
             manual = false;
             break;
@@ -574,7 +601,8 @@ static void usage(void)
 "                         attributed via the beam burst or the preceding UF11, else dropped\n"
 "  -S, --modes-only       drop Mode A/C and intermode (A/C-only, A/C/S all-call) interrogations\n"
 "  -C, --ac-only          keep only plain Mode A/C (tokens AA / CC, no P4) as sent by older SSR\n"
-"                         radars; drops Mode S and all intermode all-calls (not with -S, -R or -A)\n"
+"                         radars; drops Mode S and all intermode all-calls (not with -S, -R, -A, -c)\n"
+"  -c, --no-plain-ac      drop plain Mode A/C (tokens AA / CC, no P4); keeps Mode S and intermode\n"
 "  -R, --rollcall-only    keep only interrogations addressed to an aircraft (UF4/5/20/21/24/19):\n"
 "                         drops UF11 and A/C/intermode all-calls and plain Mode A/C\n"
 "  -A, --aircraft LIST    keep only interrogations addressed to these aircraft: up to 16 hex\n"
@@ -607,7 +635,7 @@ static void usage(void)
 "      --adsb-gain DB     nominal HackRF gain during 1090 windows (default 64; -1 keeps the\n"
 "                         1030 gain, which automatic gain keeps low near a radar)\n"
 "      --adsb-db PATH     load/save the address-callsign table (works with --file too)\n"
-"      --adsblol LAT,LON  at startup, fetch hex/callsign pairs of all aircraft around this\n"
+"      --adsblol LAT,LON|NAME  at startup, fetch hex/callsign pairs of all aircraft around this\n"
 "                         position from api.adsb.lol (sends the coordinates to adsb.lol)\n"
 "      --adsblol-radius NM  radius for --adsblol (default 150, max 250)\n\n"
 "Detection:\n"
@@ -628,10 +656,16 @@ static void usage(void)
 "  -L, --list             scrolling one-line-per-interrogation output instead of dashboard\n"
 "      --tcas             include TCAS/ACAS in --list output\n"
 "  -d, --dashboard        dashboard also in --file mode (default: summary only)\n"
-"  -q, --quiet            no live output; summary at exit\n\n"
+"  -q, --quiet            no live output; summary at exit\n"
+"      --graph-floor DB   burst graph bar scale starts at this dBFS (default -45; ends at +3)\n"
+"  -h, --human            Comm-B requests by short name (trk, selAlt, ...) instead of the uplink\n"
+"                         format and register (UF4b50, UF5b20, UF20b60)\n"
+"      --help             this text\n\n"
 "Keys (dashboard): q quit, +/- VGA, L/l LNA, p RF amp (any of these: manual gain), g auto gain,\n"
 "                  r radar filter, a aircraft filter (type it, Enter; empty clears),\n"
-"                  S Mode S only on/off, R roll-calls only on/off, b burst graph, space freeze screen,\n"
+"                  S Mode S only on/off, R roll-calls only on/off, c plain A/C (AA/CC) off/on,\n"
+"                  C plain A/C only on/off (turns off S, R, c and the aircraft filter),\n"
+"                  b burst graph, space freeze screen,\n"
 "                  x reset statistics\n"
 "                  With --rx1090: F autofreeze (freeze on the first burst with matched replies and\n"
 "                  show it in the burst graph, which lists each reply under its query)\n");
@@ -648,15 +682,15 @@ int main(int argc, char **argv)
         { "member-db", 1, 0, 8 }, { "core-db", 1, 0, 9 }, { "log", 1, 0, 'o' }, { "space", 0, 0, 10 },
         { "list", 0, 0, 'L' }, { "tcas", 0, 0, 11 }, { "dashboard", 0, 0, 'd' }, { "quiet", 0, 0, 'q' },
         { "radar", 1, 0, 'r' }, { "modes-only", 0, 0, 'S' }, { "aircraft", 1, 0, 'A' },
-        { "rollcall-only", 0, 0, 'R' }, { "ac-only", 0, 0, 'C' },
+        { "rollcall-only", 0, 0, 'R' }, { "ac-only", 0, 0, 'C' }, { "no-plain-ac", 0, 0, 'c' },
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
         { "no-auto-gain", 0, 0, 17 }, { "rx1090", 1, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
-        { "beep", 0, 0, 22 }, { "no-1090-sync", 0, 0, 23 }, { "adsb-gain", 1, 0, 24 },
-        { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
+        { "beep", 0, 0, 22 }, { "no-1090-sync", 0, 0, 23 }, { "adsb-gain", 1, 0, 24 }, { "graph-floor", 1, 0, 26 },
+        { "human", 0, 0, 'h' }, { "help", 0, 0, 25 }, { 0, 0, 0, 0 }
     };
     int c;
-    while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SCRA:Bh", lo, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SCcRA:Bh", lo, NULL)) != -1) {
         switch (c) {
         case 'f': opt.file = optarg; break;
         case 'w': opt.record = optarg; break;
@@ -673,6 +707,7 @@ int main(int argc, char **argv)
         case 22: opt.beep = true; break;
         case 23: opt.no_sync = true; break;
         case 24: opt.adsb_gain = atoi(optarg); break;
+        case 26: display_set_graph_floor((float)atof(optarg)); break;
         case 5: opt.dens_max = atoi(optarg); break;
         case 6: opt.acfg.burst_gap = atof(optarg) / 1e3; break;
         case 7: opt.acfg.burst_min = atoi(optarg); break;
@@ -691,6 +726,7 @@ int main(int argc, char **argv)
         case 'S': opt.acfg.modes_only = true; break;
         case 'R': opt.acfg.rollcall_only = true; break;
         case 'C': opt.acfg.ac_only = true; break;
+        case 'c': opt.acfg.no_ac = true; break;
         case 'A':
             {
                 char bad[64];
@@ -701,25 +737,30 @@ int main(int argc, char **argv)
         case 12: opt.adsb_every = atof(optarg); break;
         case 13: opt.adsb_dwell = atof(optarg); opt.dwell_set = true; break;
         case 14: opt.adsb_db = optarg; break;
-        case 15:
-            if (sscanf(optarg, "%lf,%lf", &opt.lol_lat, &opt.lol_lon) != 2 ||
-                fabs(opt.lol_lat) > 90 || fabs(opt.lol_lon) > 180) {
-                fprintf(stderr, "bad coordinates '%s' (use LAT,LON in decimal degrees, e.g. 52.23,21.01)\n", optarg);
+        case 15: {
+            double alt;
+            int e = geo_parse(optarg, &opt.lol_lat, &opt.lol_lon, &alt);
+            if (e == -2) { fprintf(stderr, "--adsblol: '%s' is not in " POSITIONS_FILE "\n", optarg); return 1; }
+            if (e < 0) {
+                fprintf(stderr, "bad coordinates '%s' (use LAT,LON in decimal degrees, e.g. 52.23,21.01, or a name from "
+                                POSITIONS_FILE ")\n", optarg);
                 return 1;
             }
             opt.lol = true;
             break;
+        }
         case 16: opt.lol_radius = atoi(optarg); break;
         case 17: opt.agc = false; break;
         case 18: opt.rx1090 = optarg; break;
         case 19: opt.radar_pos = optarg; break;
         case 20: opt.rx_pos = optarg; break;
-        default: usage(); return c == 'h' ? 0 : 1;
+        case 'h': bds_human = true; break;
+        default: usage(); return c == 25 ? 0 : 1;
         }
     }
     if (opt.fs < 8e6) { fprintf(stderr, "sample rate must be >= 8e6 for Mode S DPSK\n"); return 1; }
-    if (opt.acfg.ac_only && (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.nac)) {
-        fprintf(stderr, "-C (plain A/C only) cannot be combined with -S, -R or -A: nothing would pass\n");
+    if (opt.acfg.ac_only && (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.nac || opt.acfg.no_ac)) {
+        fprintf(stderr, "-C (plain A/C only) cannot be combined with -S, -R, -A or -c: nothing would pass\n");
         return 1;
     }
     bool live = opt.file == NULL;

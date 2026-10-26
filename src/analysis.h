@@ -23,6 +23,7 @@ struct gpoint {
     double t;               /* stream time, s */
     float amp;              /* dBFS */
     float p2, p5;           /* SLS pulse levels, dBFS; NAN when not detected */
+    float sq;               /* no SLS pulse: level at its slot, dBFS; NAN otherwise */
     uint32_t addr;          /* addressed aircraft, NO_ADDR when none */
     uint16_t tok;           /* seq_token */
     uint8_t ka;             /* target index, NO_TARGET when none */
@@ -102,7 +103,7 @@ struct analysis_state {
     long total[K_COUNT], inbeam[K_COUNT], side[K_COUNT];
     long tcas_total, tcas_uf0, tcas_uf16, tcas_ws;
     long n_all, n_pass;
-    long filt_radar, filt_modes, filt_ac, filt_rollcall, filt_aircraft;
+    long filt_radar, filt_modes, filt_ac, filt_noac, filt_rollcall, filt_aircraft;
 
     struct open_burst ob;
     struct burst hist[BURST_HIST];

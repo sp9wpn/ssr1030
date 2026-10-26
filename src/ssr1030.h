@@ -42,6 +42,7 @@ struct interrog {
     float p6_db;        /* Mode S P6 plateau, dBFS; NAN for A/C */
     float p2_db;        /* P2 - P1 in dB; NAN when no P2 */
     float p5_db;        /* Mode S: P5 - P6 in dB (>= 0: sidelobe); NAN when no P5 detected */
+    float sls_floor_db; /* no P2 (A/C) / P5 (Mode S) above noise + 6 dB: the level read at its slot, dBFS; else NAN */
     float p4_width;     /* us, 0 when none */
     bool s1;            /* whisper-shout S1 pulse 2 us before P1 */
     bool sidelobe;      /* P2 >= P1 (A/C) or no sync reversal (S) */
@@ -109,6 +110,7 @@ const char *kind_token(int k);
 const char *bds_abbrev(int bds);                 /* shortcode for BDS1*16+BDS2, NULL if unnamed */
 uint16_t seq_token(const struct interrog *it);   /* kind + requested BDS, for burst sequences */
 const char *seq_token_str(uint16_t t, char *buf, size_t len);
+extern bool bds_human;                           /* -h: Comm-B requests by short name (trk), else UF4b50 */
 bool kind_is_modes(int k);
 bool kind_is_allcall(int k);
 
@@ -125,6 +127,7 @@ struct analysis_cfg {
     int radar_sel;         /* radar code to keep, -1 = all */
     bool modes_only;       /* drop Mode A/C and intermode interrogations */
     bool ac_only;          /* keep only plain Mode A/C (no P4), as sent by older SSR radars */
+    bool no_ac;            /* drop plain Mode A/C (AA/CC) */
     bool rollcall_only;    /* keep only interrogations addressed to an aircraft */
     int nac;               /* aircraft to keep (0 = all) */
     struct ac_sel ac[AC_MAX];
@@ -256,6 +259,7 @@ void display_init(void);
 void display_restore(void);
 void display_render(const struct run_info *ri, double now, struct demod *d, uint64_t drops);
 void display_graph_key(int key);
+void display_set_graph_floor(float dbfs);   /* burst chart bar scale left edge */
 void display_graph_pin(int burst_id);   /* show this burst in the graph (autofreeze) */
 void display_status_only(const struct run_info *ri);   /* frozen dashboard: redraw the bottom row only */   /* 'U' 'D' 'P' 'N' 'H' 'E': scroll the burst graph */
 

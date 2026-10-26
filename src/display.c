@@ -130,13 +130,13 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
         snprintf(line + o, sizeof(line) - o, B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R,
                  ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
     else if (ri->cmd_msg[0])
-        snprintf(line + o, sizeof(line) - o, YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  b graph  space freeze  x reset" R,
+        snprintf(line + o, sizeof(line) - o, YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  c no AA/CC  C AA/CC only  b graph  space freeze  x reset" R,
                  ri->cmd_msg);
     else if (ri->graph)
         snprintf(line + o, sizeof(line) - o, DIM "keys: b dashboard  \u2191\u2193 PgUp PgDn Home End scroll  r radar filter  a aircraft filter  "
-                 "S Mode S only  R roll-calls only  space freeze%s  q quit" R, ri->rx1090 ? "  F autofreeze" : "");
+                 "S Mode S only  R roll-calls only  c no AA/CC  C AA/CC only  space freeze%s  q quit" R, ri->rx1090 ? "  F autofreeze" : "");
     else snprintf(line + o, sizeof(line) - o, DIM "keys: q quit  +/- VGA  L/l LNA (manual)  p RF amp  g auto gain  r radar filter  a aircraft filter  "
-                  "S Mode S only  R roll-calls only  b burst graph  space freeze%s  x reset stats" R,
+                  "S Mode S only  R roll-calls only  c no AA/CC  C AA/CC only  b burst graph  space freeze%s  x reset stats" R,
                   ri->rx1090 ? "  F autofreeze" : "");
     /* on the last row one column stays free so the terminal never wraps/scrolls */
     put_cut(line, term_cols() - 1);
@@ -150,8 +150,10 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
 static const char *gp_char(int cls) { return cls == GP_BEAM ? "\u2588" : cls == GP_SIDE ? "\u2591" : "\u2592"; }
 static const char *gp_color(int cls) { return cls == GP_BEAM ? GRN : cls == GP_SIDE ? YEL : DIM; }
 
-#define GRAPH_BOT_DBFS (-40.0f)
+static float graph_bot = -45.0f;        /* bar scale left edge, dBFS (--graph-floor) */
 #define GRAPH_TOP_DBFS (3.0f)
+
+void display_set_graph_floor(float dbfs) { graph_bot = dbfs < GRAPH_TOP_DBFS - 10 ? dbfs : GRAPH_TOP_DBFS - 10; }
 
 static int g_scroll, g_burst = -1, g_page = 20, g_key;
 static bool frozen_view;
@@ -195,7 +197,7 @@ static void draw_graph(int cols, int rows)
     }
     /* fixed scale: left edge just below the noise floor, right edge where
      * I/Q clipping starts, so bars compare between bursts */
-    float ytop = GRAPH_TOP_DBFS, ybot = GRAPH_BOT_DBFS;
+    float ytop = GRAPH_TOP_DBFS, ybot = graph_bot;
     (void)amax; (void)amin;
 
     int page = rows - 3;
@@ -230,7 +232,7 @@ static void draw_graph(int cols, int rows)
         snprintf(hdr, sizeof(hdr), B "Burst #%d %s%s" R "  dur %.1f ms%s  peak %.1f dBFS  gain %.0f dB  beam %d  sidelobe %d  weak %d%s"
                  DIM "  rows %d-%d/%d  bars %.0f..%+.0f dBFS" R,
                  b->id, b->key, b->partial ? "*" : "", 1e3 * (b->t1 - b->t0), rt, b->peak, b->gain, b->n, b->nside,
-                 b->nweak, rp, g_scroll + 1, last, n, GRAPH_BOT_DBFS, GRAPH_TOP_DBFS);
+                 b->nweak, rp, g_scroll + 1, last, n, graph_bot, GRAPH_TOP_DBFS);
         put_cut(hdr, cols - 1);
         fputs(EL, stdout);
     }
@@ -254,11 +256,16 @@ static void draw_graph(int cols, int rows)
         float mv = NAN;
         if (!isnan(g->p2)) { mk = "P2"; mv = g->p2; }
         else if (!isnan(g->p5)) { mk = "P5"; mv = g->p5; }
-        int mpos = -1;
+        int mpos = -1, dpos = -1;
         if (mk) {
             mpos = (int)lroundf((mv - ybot) / (ytop - ybot) * W);
             if (mpos < 2) mpos = 2;
             if (mpos > W) mpos = W;
+        } else if (!isnan(g->sq)) {
+            /* no P2/P5 above noise + 6 dB: a dot at the level read where it would be */
+            dpos = (int)lroundf((g->sq - ybot) / (ytop - ybot) * W) - 1;
+            if (dpos < 0) dpos = 0;
+            if (dpos > W - 1) dpos = W - 1;
         }
         /* fixed-width fields: query 12 (longest token, e.g. S-msg/hdgSpd), target 8 (callsign or hex),
          * "*" when it was answered on 1090, "sls" when the query reached us through a sidelobe */
@@ -268,8 +275,11 @@ static void draw_graph(int cols, int rows)
                ts, tg, g->ans ? "*" : " ", g->cls == GP_SIDE ? "sls" : "", g->amp);
         fputs(R, stdout);
         int end = mpos > len ? mpos : len;
+        if (dpos >= end) end = dpos + 1;
         for (int k = 0; k < end; k++) {
-            if (mk && k >= mpos - 2 && k < mpos) {
+            if (k == dpos) {
+                printf(k < len ? R "\033[7;31m\u00b7" R : R RED "\u00b7" R);
+            } else if (mk && k >= mpos - 2 && k < mpos) {
                 /* inside the bar: inverse, beyond it: plain bold */
                 printf(k < len ? R "\033[1;7;31m%c" R : R B RED "%c" R, mk[k - (mpos - 2)]);
             } else if (k < len) {
@@ -455,9 +465,9 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     {
         char fl[360];
         int o = snprintf(fl, sizeof(fl), "Filters: %s", ri->filters[0] ? ri->filters : "none");
-        if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_rollcall || AS.filt_aircraft)
-            snprintf(fl + o, sizeof(fl) - o, "  (dropped: radar %ld, non-S %ld, not plain A/C %ld, all-call %ld, aircraft %ld)",
-                     AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_rollcall, AS.filt_aircraft);
+        if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_noac || AS.filt_rollcall || AS.filt_aircraft)
+            snprintf(fl + o, sizeof(fl) - o, "  (dropped: radar %ld, non-S %ld, not plain A/C %ld, plain A/C %ld, all-call %ld, aircraft %ld)",
+                     AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_noac, AS.filt_rollcall, AS.filt_aircraft);
         printf("%s", fl);
         if (ri->adsb) {
             struct adsb_stats as;
@@ -527,7 +537,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         if (!AS.bds[b]) continue;
         const char *ab = bds_abbrev(b);
         char lab[16];
-        snprintf(lab, sizeof(lab), "%X,%X %s", b >> 4, b & 15, ab ? ab : "");
+        snprintf(lab, sizeof(lab), "%X,%X %s", b >> 4, b & 15, ab && bds_human ? ab : "");
         snprintf(mid[nm++], 96, "%-14s %7ld %7ld %6ld %5.0f", lab, AS.bds[b], AS.bds_inbeam[b], AS.bds_side[b], bds_rate[b]);
     }
     if (nm == 1) snprintf(mid[nm++], 96, DIM "(no Comm-B requests yet)" R);
@@ -573,8 +583,8 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     if (AS.nhist > 0) {
         struct burst *b = &AS.hist[(AS.nhist - 1) % BURST_HIST];
         printf(B "Last burst #%d sequence" R DIM
-               "  (A C A/C-only all-call, AA CC plain A/C, S UF11 all-call, alt/sqk UF4/5, acid/selAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0, S-msg Comm-A, xN repeat)" R EL,
-               b->id);
+               "  (A C A/C-only all-call, AA CC plain A/C, S UF11 all-call, alt/sqk UF4/5, %s, S-msg Comm-A, xN repeat)" R EL,
+               b->id, bds_human ? "acid/selAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0" : "UF4b50 UF4 asking BDS 5,0");
         print_seq(b, cols, 4);
     } else fputs(EL EL EL, stdout);
 

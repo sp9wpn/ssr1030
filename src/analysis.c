@@ -80,7 +80,11 @@ int tok_group(uint16_t tok)
     }
 }
 
-const char *group_label(int g) { return group_labels[g]; }
+const char *group_label(int g)
+{
+    static const char *const reg[G_COUNT] = { [G_CAL] = "b20", [G_SETALT] = "b40", [G_TRK] = "b50", [G_HDGSPD] = "b60" };
+    return !bds_human && reg[g] ? reg[g] : group_labels[g];
+}
 
 static int cmpd(const void *a, const void *b)
 {
@@ -290,6 +294,7 @@ static bool passes(const struct interrog *x)
     if (AS.cfg.radar_sel >= 0 && x->radar != AS.cfg.radar_sel) { AS.filt_radar++; return false; }
     if (AS.cfg.modes_only && !kind_is_modes(x->kind)) { AS.filt_modes++; return false; }
     if (AS.cfg.ac_only && x->kind != K_MODEA && x->kind != K_MODEC) { AS.filt_ac++; return false; }
+    if (AS.cfg.no_ac && (x->kind == K_MODEA || x->kind == K_MODEC)) { AS.filt_noac++; return false; }
     if (AS.cfg.rollcall_only && !directed(x->kind)) { AS.filt_rollcall++; return false; }
     if (aircraft_filter_on() && !to_target(x)) { AS.filt_aircraft++; return false; }
     return true;
@@ -471,12 +476,13 @@ static bool graph_extra_ok(const struct interrog *y)
     if (AS.cfg.radar_sel >= 0 && y->radar >= 0 && y->radar != AS.cfg.radar_sel) return false;
     if (AS.cfg.modes_only && !kind_is_modes(y->kind)) return false;
     if (AS.cfg.ac_only && y->kind != K_MODEA && y->kind != K_MODEC) return false;
+    if (AS.cfg.no_ac && (y->kind == K_MODEA || y->kind == K_MODEC)) return false;
     if (AS.cfg.rollcall_only && !directed(y->kind)) return false;
     if (aircraft_filter_on() && !to_target(y)) return false;
     return true;
 }
 
-static void graph_put(struct burst *b, double t, float amp, float p2, float p5, uint32_t addr, uint16_t tok,
+static void graph_put(struct burst *b, double t, float amp, float p2, float p5, float sq, uint32_t addr, uint16_t tok,
                       int ka, int cls, bool ans, uint64_t rep_idx, int rep_n)
 {
     if (b->ngp >= SEQ_MAX) return;
@@ -486,6 +492,7 @@ static void graph_put(struct burst *b, double t, float amp, float p2, float p5, 
     g->amp = amp;
     g->p2 = p2;
     g->p5 = p5;
+    g->sq = sq;
     g->tok = tok;
     g->ka = (uint8_t)ka;
     g->cls = (uint8_t)cls;
@@ -510,7 +517,7 @@ static uint32_t gaddr(const struct interrog *y) { return directed(y->kind) ? y->
 
 static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka)
 {
-    graph_put(b, y->t, y->amp_db, abs_p2(y), abs_p5(y), gaddr(y), seq_token(y), ka, cls, y->answered, y->rep_idx, y->rep_n);
+    graph_put(b, y->t, y->amp_db, abs_p2(y), abs_p5(y), y->sls_floor_db, gaddr(y), seq_token(y), ka, cls, y->answered, y->rep_idx, y->rep_n);
 }
 
 /* Non-beam queries for the graph. Sidelobes are kept from 60 % of a rotation
@@ -520,7 +527,7 @@ static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka
 #define GRING 16384
 #define NPOST 8
 static struct {
-    double t; float amp, p2, p5; uint32_t addr; uint16_t tok; uint8_t cls; bool ans; uint8_t rep_n; uint64_t rep_idx;
+    double t; float amp, p2, p5, sq; uint32_t addr; uint16_t tok; uint8_t cls; bool ans; uint8_t rep_n; uint64_t rep_idx;
 } gring[GRING];
 static uint64_t gring_n;
 static struct { int idx; double until_side, until_weak; } posts[NPOST];
@@ -534,12 +541,12 @@ static void graph_note(const struct interrog *y)
     for (int p = 0; p < nposts; p++) {
         double until = cls == GP_SIDE ? posts[p].until_side : posts[p].until_weak;
         if (y->t <= until && AS.nhist - posts[p].idx <= BURST_HIST)
-            graph_put(&AS.hist[posts[p].idx % BURST_HIST], y->t, y->amp_db, abs_p2(y), abs_p5(y), gaddr(y), tok,
+            graph_put(&AS.hist[posts[p].idx % BURST_HIST], y->t, y->amp_db, abs_p2(y), abs_p5(y), y->sls_floor_db, gaddr(y), tok,
                       NO_TARGET, cls, y->answered, y->rep_idx, y->rep_n);
     }
     int i = gring_n++ % GRING;
     gring[i].t = y->t; gring[i].amp = y->amp_db; gring[i].tok = tok; gring[i].cls = (uint8_t)cls;
-    gring[i].p2 = abs_p2(y); gring[i].p5 = abs_p5(y); gring[i].addr = gaddr(y); gring[i].ans = y->answered;
+    gring[i].p2 = abs_p2(y); gring[i].p5 = abs_p5(y); gring[i].sq = y->sls_floor_db; gring[i].addr = gaddr(y); gring[i].ans = y->answered;
     gring[i].rep_idx = y->rep_idx; gring[i].rep_n = y->rep_n;
 }
 
@@ -569,7 +576,7 @@ static void graph_context(struct burst *b, double t0, double t1, double margin, 
         double lo = gring[i].cls == GP_SIDE ? t0 - half : t0 - margin;
         double hi = gring[i].cls == GP_SIDE ? t1 + half : t1 + margin;
         if (gring[i].t < lo || gring[i].t > hi) continue;
-        graph_put(b, gring[i].t, gring[i].amp, gring[i].p2, gring[i].p5, gring[i].addr, gring[i].tok, NO_TARGET,
+        graph_put(b, gring[i].t, gring[i].amp, gring[i].p2, gring[i].p5, gring[i].sq, gring[i].addr, gring[i].tok, NO_TARGET,
                   gring[i].cls, gring[i].ans, gring[i].rep_idx, gring[i].rep_n);
     }
     qsort(b->gp, b->ngp, sizeof(b->gp[0]), cmp_gp);
@@ -837,10 +844,10 @@ void analysis_print_summary(FILE *f)
 {
     fprintf(f, "\n=== ssr1030 summary: %.1f s analysed, %ld interrogations, %ld passed filters ===\n",
             AS.now, AS.n_all, AS.n_pass);
-    if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_rollcall || AS.filt_aircraft)
-        fprintf(f, "filtered out: other/unknown radar %ld, non-Mode S %ld, not plain A/C %ld, all-call/unaddressed %ld, "
-                   "other aircraft %ld\n",
-                AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_rollcall, AS.filt_aircraft);
+    if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_noac || AS.filt_rollcall || AS.filt_aircraft)
+        fprintf(f, "filtered out: other/unknown radar %ld, non-Mode S %ld, not plain A/C %ld, plain A/C %ld, "
+                   "all-call/unaddressed %ld, other aircraft %ld\n",
+                AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_noac, AS.filt_rollcall, AS.filt_aircraft);
     if (aircraft_filter_on()) {
         char l[512];
         ac_list_str(&AS.cfg, true, l, sizeof(l));
@@ -908,9 +915,13 @@ void analysis_print_summary(FILE *f)
     if (AS.nhist) {
         fprintf(f, "  (* = burst touched an ADS-B window; excluded from per-burst statistics)\n");
         fprintf(f, "  tokens: A C A/C-only all-call | AA CC plain Mode A/C | As Cs A/C/S all-call | S UF11 all-call\n"
-                   "          alt UF4 altitude | sqk UF5 Mode A code | S-msg Comm-A (UF20/21) | S-elm UF24\n"
-                   "          Comm-B: acid 2,0 aircraft identification (callsign) | selAlt 4,0 selected alt | trk 5,0 track/turn |\n"
-                   "          hdgSpd 6,0 heading/speed | cap 1,0 | gicb 1,7 | pos 5,1/5,2 | met 4,4 | S-bXY other\n");
+                   "          alt UF4 altitude | sqk UF5 Mode A code | S-msg Comm-A (UF20/21) | S-elm UF24\n");
+        if (bds_human)
+            fprintf(f, "          Comm-B: acid 2,0 aircraft identification (callsign) | selAlt 4,0 selected alt | trk 5,0 track/turn |\n"
+                       "          hdgSpd 6,0 heading/speed | cap 1,0 | gicb 1,7 | pos 5,1/5,2 | met 4,4 | S-bXY other\n");
+        else
+            fprintf(f, "          Comm-B: UFnbXY = UFn roll-call requesting BDS X,Y (UF4b20 callsign, b40 selected alt,\n"
+                       "          b50 track/turn, b60 heading/speed); -h shows short names\n");
     }
 
     fprintf(f, "\nIn-beam transitions (top 16):\n");

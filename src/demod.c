@@ -213,6 +213,7 @@ static void decode_modes(struct demod *d, struct interrog *it, double p6lead, do
         float p6lvl = p6_level(d, p6lead, p6width, tau);
         it->p6_db = p6lvl > 0 ? dbfs(p6lvl) : NAN;
         it->p5_db = p5 >= d->thr_sls && p6lvl > 0 ? dbfs(p5) - it->p6_db : NAN;   /* relative to P6 */
+        if (isnan(it->p5_db) && p5 > 0) it->sls_floor_db = dbfs(p5);
         if (!isnan(it->p5_db) && p5 >= p6) {
             /* transponder rule: P5 at least as strong as P6 = sidelobe. A
              * transponder would not reply, but the data chips after P5 are intact */
@@ -356,6 +357,7 @@ static void match(struct demod *d, uint64_t i)
     memset(&it, 0, sizeof(it));
     it.p2_db = NAN;
     it.p5_db = NAN;
+    it.sls_floor_db = NAN;
     it.p6_db = NAN;
 
     /* --- Mode S: P1, P2 @2.0, P6 @3.5 --- */
@@ -419,6 +421,7 @@ static void match(struct demod *d, uint64_t i)
              * well below the pulse threshold in the main beam) */
             float a2 = slot_level(d, p1->lead + 2.15 * d->spus, p1->lead + 2.65 * d->spus);
             if (a2 >= d->thr_sls) it.p2_db = 20.0f * log10f(a2 / p1->amp);
+            else if (a2 > 0) it.sls_floor_db = dbfs(a2);
         }
         int j4 = find_at(d, i, off3[m] + 2.0, 0.15, false, true);
         if (j4 > 0) {
