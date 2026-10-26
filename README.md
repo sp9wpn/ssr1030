@@ -20,7 +20,7 @@ It is based on [dump1030](https://github.com/Fuziih/dump1030).
 
 ![Burst chart](docs/burst-chart.png)
 
-*Burst chart (`b`): every interrogation around one main-beam burst, with its level and the P2/P5 suppression pulse. Dotted rows came through the sidelobes.*
+*Burst chart (`b`): every interrogation around one main-beam burst, with its level and the P2/P5 suppression pulse. Yellow bars came through the sidelobes.*
 
 ## Build
 
