@@ -371,6 +371,8 @@ static void build_filters(char *buf, size_t n)
     if (opt.acfg.modes_only) o += snprintf(buf + o, n - o, "Mode S only  ");
     if (opt.acfg.ac_only) o += snprintf(buf + o, n - o, "plain A/C only  ");
     if (opt.acfg.no_ac) o += snprintf(buf + o, n - o, "no plain A/C  ");
+    if (opt.acfg.ii0_only) o += snprintf(buf + o, n - o, "II0 only  ");
+    if (opt.acfg.no_ii0) o += snprintf(buf + o, n - o, "no II0  ");
     if (opt.acfg.rollcall_only) o += snprintf(buf + o, n - o, "roll-calls only  ");
     if (opt.acfg.nac) {
         char l[160];
@@ -410,7 +412,8 @@ static void apply_input(struct run_info *ri, char kind, char *arg)
         opt.acfg.radar_sel = code;
         char rc[8];
         radar_code_str(code, rc, sizeof(rc));
-        snprintf(m, sizeof(m), "radar filter %s", rc);
+        snprintf(m, sizeof(m), "radar filter %s%s", rc, code > 0 && opt.acfg.ii0_only ? " (II0 only OFF)" : "");
+        if (code > 0) opt.acfg.ii0_only = false;  /* another radar's queries are never II0 */
         apply_filters(ri, m);
     } else {
         if (!*arg) {
@@ -520,17 +523,40 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             apply_filters(ri, opt.acfg.no_ac ? "plain A/C (AA/CC) dropped" : "plain A/C (AA/CC) kept again");
             manual = false;
             break;
+        case 'i':
+            opt.acfg.no_ii0 = !opt.acfg.no_ii0;
+            if (opt.acfg.no_ii0) opt.acfg.ii0_only = false;      /* together nothing would pass */
+            apply_filters(ri, opt.acfg.no_ii0 ? "II0 queries dropped" : "II0 queries kept again");
+            manual = false;
+            break;
+        case 'I': {
+            opt.acfg.ii0_only = !opt.acfg.ii0_only;
+            char m[160] = "II0 only OFF";
+            if (opt.acfg.ii0_only) {
+                /* plain A/C carries no code; another radar filter or no II0 would leave nothing */
+                bool rad = opt.acfg.radar_sel > 0;
+                int o = snprintf(m, sizeof(m), "II0 only ON");
+                if (opt.acfg.no_ii0 || opt.acfg.ac_only || rad)
+                    o += snprintf(m + o, sizeof(m) - o, "; off:%s%s%s", opt.acfg.no_ii0 ? " no II0" : "",
+                                  opt.acfg.ac_only ? " plain A/C only" : "", rad ? " radar filter" : "");
+                opt.acfg.no_ii0 = opt.acfg.ac_only = false;
+                if (rad) opt.acfg.radar_sel = -1;
+            }
+            apply_filters(ri, m);
+            manual = false;
+            break;
+        }
         case 'C': {
             opt.acfg.ac_only = !opt.acfg.ac_only;
             char m[160] = "plain A/C only OFF";
             if (opt.acfg.ac_only) {
                 /* Mode S only, roll-calls only, no plain A/C or an aircraft filter would leave nothing */
                 int o = snprintf(m, sizeof(m), "plain A/C only ON (Mode S and intermode dropped)");
-                if (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.no_ac || opt.acfg.nac)
-                    o += snprintf(m + o, sizeof(m) - o, "; off:%s%s%s%s", opt.acfg.modes_only ? " Mode S only" : "",
+                if (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.no_ac || opt.acfg.nac || opt.acfg.ii0_only)
+                    o += snprintf(m + o, sizeof(m) - o, "; off:%s%s%s%s%s", opt.acfg.modes_only ? " Mode S only" : "",
                                   opt.acfg.rollcall_only ? " roll-calls only" : "", opt.acfg.no_ac ? " no plain A/C" : "",
-                                  opt.acfg.nac ? " aircraft filter" : "");
-                opt.acfg.modes_only = opt.acfg.rollcall_only = opt.acfg.no_ac = false;
+                                  opt.acfg.nac ? " aircraft filter" : "", opt.acfg.ii0_only ? " II0 only" : "");
+                opt.acfg.modes_only = opt.acfg.rollcall_only = opt.acfg.no_ac = opt.acfg.ii0_only = false;
                 opt.acfg.nac = 0;
             }
             apply_filters(ri, m);
@@ -604,6 +630,9 @@ static void usage(void)
 "  -C, --ac-only          keep only plain Mode A/C (tokens AA / CC, no P4) as sent by older SSR\n"
 "                         radars; drops Mode S and all intermode all-calls (not with -S, -R, -A, -c)\n"
 "  -c, --no-plain-ac      drop plain Mode A/C (tokens AA / CC, no P4); keeps Mode S and intermode\n"
+"  -I, --ii0-only         keep only II0 queries: UF11 with II 0, and roll-calls with IIS 0 that\n"
+"                         are not part of another radar's burst (SI radars send IIS 0 too)\n"
+"  -i, --no-ii0           drop those II0 queries\n"
 "  -R, --rollcall-only    keep only interrogations addressed to an aircraft (UF4/5/20/21/24/19):\n"
 "                         drops UF11 and A/C/intermode all-calls and plain Mode A/C\n"
 "  -A, --aircraft LIST    keep only interrogations addressed to these aircraft: up to 16 hex\n"
@@ -685,6 +714,7 @@ int main(int argc, char **argv)
         { "list", 0, 0, 'L' }, { "tcas", 0, 0, 11 }, { "dashboard", 0, 0, 'd' }, { "quiet", 0, 0, 'q' },
         { "radar", 1, 0, 'r' }, { "modes-only", 0, 0, 'S' }, { "aircraft", 1, 0, 'A' },
         { "rollcall-only", 0, 0, 'R' }, { "ac-only", 0, 0, 'C' }, { "no-plain-ac", 0, 0, 'c' },
+        { "ii0-only", 0, 0, 'I' }, { "no-ii0", 0, 0, 'i' },
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
         { "no-auto-gain", 0, 0, 17 }, { "rx1090", 2, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
@@ -692,7 +722,7 @@ int main(int argc, char **argv)
         { "human", 0, 0, 'h' }, { "help", 0, 0, 25 }, { 0, 0, 0, 0 }
     };
     int c;
-    while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SCcRA:Bh", lo, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SCcRiIA:Bh", lo, NULL)) != -1) {
         switch (c) {
         case 'f': opt.file = optarg; break;
         case 'w': opt.record = optarg; break;
@@ -729,6 +759,8 @@ int main(int argc, char **argv)
         case 'R': opt.acfg.rollcall_only = true; break;
         case 'C': opt.acfg.ac_only = true; break;
         case 'c': opt.acfg.no_ac = true; break;
+        case 'i': opt.acfg.no_ii0 = true; break;
+        case 'I': opt.acfg.ii0_only = true; break;
         case 'A':
             {
                 char bad[64];
@@ -767,6 +799,10 @@ int main(int argc, char **argv)
     if (opt.fs < 8e6) { fprintf(stderr, "sample rate must be >= 8e6 for Mode S DPSK\n"); return 1; }
     if (opt.acfg.ac_only && (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.nac || opt.acfg.no_ac)) {
         fprintf(stderr, "-C (plain A/C only) cannot be combined with -S, -R, -A or -c: nothing would pass\n");
+        return 1;
+    }
+    if (opt.acfg.ii0_only && (opt.acfg.no_ii0 || opt.acfg.ac_only || opt.acfg.radar_sel > 0)) {
+        fprintf(stderr, "-I (II0 only) cannot be combined with -i, -C or a radar filter other than II0: nothing would pass\n");
         return 1;
     }
     bool live = opt.file == NULL;

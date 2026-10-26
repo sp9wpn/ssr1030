@@ -64,6 +64,8 @@ These apply to statistics, bursts, the log and `--list`. TCAS stays a separate s
 - `-S, --modes-only`: drops plain Mode A/C and intermode (A/C-only and A/C/S all-calls).
 - `-C, --ac-only`: keeps only plain Mode A/C (tokens `AA`/`CC`, no P4), as sent by older SSR radars. It drops Mode S and all intermode all-calls (`A`/`C`, `As`/`Cs`). It cannot be combined with `-S`, `-R`, `-A` or `-c`. The key `C` toggles it at run time.
 - `-c, --no-plain-ac`: drops plain Mode A/C (tokens `AA`/`CC`, no P4). Mode S and intermode all-calls stay. The key `c` toggles it at run time.
+- `-I, --ii0-only`: keeps only II0 queries: UF11 with II=0, and roll-calls with IIS=0 that are not part of another radar's burst (SI radars send IIS=0 too, so inside an SI55 burst they count as SI55). Useful for interrogators such as airport multilateration. It cannot be combined with `-i`, `-C` or a radar filter other than `II0`. The key `I` toggles it at run time.
+- `-i, --no-ii0`: drops those II0 queries. The key `i` toggles it at run time.
 - `-R, --rollcall-only`: keeps only interrogations addressed to an aircraft (UF4/5/20/21/24/19). It drops UF11 `S`, all intermode all-calls and plain Mode A/C.
 - `-A, --aircraft LIST`: keeps only interrogations addressed to the listed aircraft (UF0/4/5/16/19/20/21/24).
   - `LIST` holds up to 16 entries separated by commas, spaces or semicolons, for example `-A 48af01,LOT3KM,DLH123`.
@@ -176,6 +178,8 @@ Dashboard keys:
 | `R` | Roll-calls only on/off (same as `-R`) |
 | `c` | Plain Mode A/C (`AA`/`CC`) off/on (same as `-c`). Turning it off also ends `-C` |
 | `C` | Plain Mode A/C only on/off (same as `-C`). Turning it on also ends `-S`, `-R`, `-c` and the aircraft filter, which would leave nothing; `S`, `R` or an aircraft filter end it |
+| `i` | II0 queries off/on (same as `-i`). Turning it off also ends `-I` |
+| `I` | II0 queries only on/off (same as `-I`). Turning it on also ends `-i`, `-C` and a radar filter other than `II0`; setting another radar filter ends it |
 | `b` | Burst graph screen on/off (see below) |
 | `space` | Freeze the screen on/off: data collection continues. On the burst chart the shown burst is pinned and stays scrollable |
 | `F` | With `--rx1090`: autofreeze, freeze on the first burst with matched 1090 replies and show it in the burst chart |
@@ -278,7 +282,7 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 ```
 
 - **Scale:** fixed, from −45 dBFS (below the noise floor; `--graph-floor DB` changes it) to +3 dBFS (where I/Q clipping starts), so bar lengths compare between bursts. The header shows the gain each burst was received with.
-- **Each row:** time relative to the middle of the beam pass, antenna angle from the beam middle (from the radar's rotation period, shown in the header; `-` while it is unknown), amplitude = P6 for Mode S and P1 for A/C, query token (12 characters), target (8 characters: callsign when known, else hex address), the II/SI code when the query carries one (UF11 II/SI, roll-call SIS with DI=3 or IIS with DI=0/1/7, so IIS=0 shows as `II0`), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
+- **Each row:** time relative to the middle of the beam pass, antenna angle from the beam middle (from the radar's rotation period, shown in the header; `-` while it is unknown), amplitude = P6 for Mode S and P1 for A/C, query token (12 characters), target (8 characters: callsign when known, else hex address), the II/SI code when the query carries one (UF11 II/SI, roll-call SIS with DI=3 or IIS with DI=0/1/7; a roll-call with IIS=0 shows `IIS0`, since SI radars send that too and it does not prove II0), `sls` for sidelobe queries, amplitude in dBFS, and a bar whose length is the amplitude.
 - **Bar colour** (plain ANSI background colours; the examples here stand them in as `█` `░` `▒`):
   - green: in-beam query
   - yellow: sidelobe (SLS: P2 ≥ P1, or Mode S without sync)

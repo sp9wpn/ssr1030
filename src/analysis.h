@@ -28,13 +28,14 @@ struct gpoint {
     uint32_t addr;          /* addressed aircraft, NO_ADDR when none */
     uint16_t tok;           /* seq_token */
     uint8_t ka;             /* target index, NO_TARGET when none */
-    int8_t code;            /* II/SI code sent in the query (radar_code_str), -1 none */
+    int8_t code;            /* II/SI code sent in the query (radar_code_str), GP_IIS0, -1 none */
     uint8_t cls;            /* GP_BEAM, GP_SIDE, GP_WEAK */
     bool ans;               /* answered on 1090 */
     uint8_t rep_n;          /* matched replies, rx1090 records rep_idx.. */
     uint64_t rep_idx;
 };
 enum { GP_BEAM = 1, GP_SIDE = 2, GP_WEAK = 3 };
+#define GP_IIS0 (-2)            /* roll-call with IIS 0: II0 or an SI radar */
 
 /* a committed burst, built from the interrogations that passed the filters */
 struct burst {
@@ -106,7 +107,7 @@ struct analysis_state {
     long total[K_COUNT], inbeam[K_COUNT], side[K_COUNT];
     long tcas_total, tcas_uf0, tcas_uf16, tcas_ws;
     long n_all, n_pass;
-    long filt_radar, filt_modes, filt_ac, filt_noac, filt_rollcall, filt_aircraft;
+    long filt_radar, filt_modes, filt_ac, filt_noac, filt_rollcall, filt_aircraft, filt_ii0;
 
     struct open_burst ob;
     struct burst hist[BURST_HIST];

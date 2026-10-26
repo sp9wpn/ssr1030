@@ -291,12 +291,22 @@ static bool to_target(const struct interrog *x)
     return false;
 }
 
+/* II0 query: UF11 with II 0, or a roll-call with IIS 0 that is not part of
+ * another radar's burst (SI radars send IIS 0 too) */
+static bool is_ii0(const struct interrog *x)
+{
+    if (x->kind == K_UF11) return modes_own_code(x) == 0;
+    return modes_iis0(x) && x->radar <= 0;
+}
+
 static bool passes(const struct interrog *x)
 {
     if (AS.cfg.radar_sel >= 0 && x->radar != AS.cfg.radar_sel) { AS.filt_radar++; return false; }
     if (AS.cfg.modes_only && !kind_is_modes(x->kind)) { AS.filt_modes++; return false; }
     if (AS.cfg.ac_only && x->kind != K_MODEA && x->kind != K_MODEC) { AS.filt_ac++; return false; }
     if (AS.cfg.no_ac && (x->kind == K_MODEA || x->kind == K_MODEC)) { AS.filt_noac++; return false; }
+    if (AS.cfg.ii0_only && !is_ii0(x)) { AS.filt_ii0++; return false; }
+    if (AS.cfg.no_ii0 && is_ii0(x)) { AS.filt_ii0++; return false; }
     if (AS.cfg.rollcall_only && !directed(x->kind)) { AS.filt_rollcall++; return false; }
     if (aircraft_filter_on() && !to_target(x)) { AS.filt_aircraft++; return false; }
     return true;
@@ -479,16 +489,19 @@ static bool graph_extra_ok(const struct interrog *y)
     if (AS.cfg.modes_only && !kind_is_modes(y->kind)) return false;
     if (AS.cfg.ac_only && y->kind != K_MODEA && y->kind != K_MODEC) return false;
     if (AS.cfg.no_ac && (y->kind == K_MODEA || y->kind == K_MODEC)) return false;
+    if (AS.cfg.ii0_only && !is_ii0(y)) return false;
+    if (AS.cfg.no_ii0 && is_ii0(y)) return false;
     if (AS.cfg.rollcall_only && !directed(y->kind)) return false;
     if (aircraft_filter_on() && !to_target(y)) return false;
     return true;
 }
 
-/* II/SI code as sent: IIS 0 shows as II0 (see modes_iis0) */
+/* II/SI code as sent; GP_IIS0 for a roll-call with IIS 0, which SI radars
+ * send too (see modes_iis0) */
 static int radio_code(const struct interrog *y)
 {
     int c = modes_own_code(y);
-    return c >= 0 ? c : modes_iis0(y) ? 0 : -1;
+    return c >= 0 ? c : modes_iis0(y) ? GP_IIS0 : -1;
 }
 
 static void graph_put(struct burst *b, double t, float amp, float p2, float p5, float sq, float noise, uint32_t addr, uint16_t tok,
@@ -864,10 +877,10 @@ void analysis_print_summary(FILE *f)
 {
     fprintf(f, "\n=== ssr1030 summary: %.1f s analysed, %ld interrogations, %ld passed filters ===\n",
             AS.now, AS.n_all, AS.n_pass);
-    if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_noac || AS.filt_rollcall || AS.filt_aircraft)
+    if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_noac || AS.filt_rollcall || AS.filt_aircraft || AS.filt_ii0)
         fprintf(f, "filtered out: other/unknown radar %ld, non-Mode S %ld, not plain A/C %ld, plain A/C %ld, "
-                   "all-call/unaddressed %ld, other aircraft %ld\n",
-                AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_noac, AS.filt_rollcall, AS.filt_aircraft);
+                   "all-call/unaddressed %ld, other aircraft %ld, II0 %ld\n",
+                AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_noac, AS.filt_rollcall, AS.filt_aircraft, AS.filt_ii0);
     if (aircraft_filter_on()) {
         char l[512];
         ac_list_str(&AS.cfg, true, l, sizeof(l));

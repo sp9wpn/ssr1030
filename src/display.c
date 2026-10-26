@@ -130,13 +130,13 @@ static void draw_status_line(const struct run_info *ri, bool last_row)
         snprintf(line + o, sizeof(line) - o, B "%s: " R "%s\033[7m \033[0m" DIM "   (Enter apply, empty = no filter, Esc cancel, Ctrl-U clear)" R,
                  ri->cmd_kind == 'r' ? "Radar filter (SI1-63 or II0-15)" : "Aircraft filter (hex or callsign)", ri->cmd);
     else if (ri->cmd_msg[0])
-        snprintf(line + o, sizeof(line) - o, YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  c no AA/CC  C AA/CC only  b graph  space freeze  x reset" R,
+        snprintf(line + o, sizeof(line) - o, YEL "%s" R DIM "   keys: q  +/-  L/l  p  g  r radar  a aircraft  S Mode S only  R roll-calls only  c no AA/CC  C AA/CC only  i no II0  I II0 only  b graph  space freeze  x reset" R,
                  ri->cmd_msg);
     else if (ri->graph)
         snprintf(line + o, sizeof(line) - o, DIM "keys: b dashboard  \u2191\u2193 PgUp PgDn Home End scroll  r radar filter  a aircraft filter  "
-                 "S Mode S only  R roll-calls only  c no AA/CC  C AA/CC only  space freeze%s  q quit" R, ri->rx1090 ? "  F autofreeze" : "");
+                 "S Mode S only  R roll-calls only  c no AA/CC  C AA/CC only  i no II0  I II0 only  space freeze%s  q quit" R, ri->rx1090 ? "  F autofreeze" : "");
     else snprintf(line + o, sizeof(line) - o, DIM "keys: q quit  +/- VGA  L/l LNA (manual)  p RF amp  g auto gain  r radar filter  a aircraft filter  "
-                  "S Mode S only  R roll-calls only  c no AA/CC  C AA/CC only  b burst graph  space freeze%s  x reset stats" R,
+                  "S Mode S only  R roll-calls only  c no AA/CC  C AA/CC only  i no II0  I II0 only  b burst graph  space freeze%s  x reset stats" R,
                   ri->rx1090 ? "  F autofreeze" : "");
     /* on the last row one column stays free so the terminal never wraps/scrolls */
     put_cut(line, term_cols() - 1);
@@ -275,6 +275,7 @@ static void draw_graph(int cols, int rows)
         if (rot > 0) snprintf(deg, sizeof(deg), "%+7.2f\u00b0 ", 360.0 * (g->t - mid) / rot);
         char rc[8] = "";
         if (g->code >= 0) radar_code_str(g->code, rc, sizeof(rc));
+        else if (g->code == GP_IIS0) snprintf(rc, sizeof(rc), "IIS0");
         printf("%s%+8.2f ms %s %-12.12s %-8.8s%s %-4s %-3s %6.1f ", g->cls == GP_BEAM ? "" : DIM, 1e3 * (g->t - mid), deg,
                ts, tg, g->ans ? "*" : " ", rc, g->cls == GP_SIDE ? "sls" : "", g->amp);
         fputs(R, stdout);
@@ -471,9 +472,9 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     {
         char fl[360];
         int o = snprintf(fl, sizeof(fl), "Filters: %s", ri->filters[0] ? ri->filters : "none");
-        if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_noac || AS.filt_rollcall || AS.filt_aircraft)
-            snprintf(fl + o, sizeof(fl) - o, "  (dropped: radar %ld, non-S %ld, not plain A/C %ld, plain A/C %ld, all-call %ld, aircraft %ld)",
-                     AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_noac, AS.filt_rollcall, AS.filt_aircraft);
+        if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_noac || AS.filt_rollcall || AS.filt_aircraft || AS.filt_ii0)
+            snprintf(fl + o, sizeof(fl) - o, "  (dropped: radar %ld, non-S %ld, not plain A/C %ld, plain A/C %ld, all-call %ld, aircraft %ld, II0 %ld)",
+                     AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_noac, AS.filt_rollcall, AS.filt_aircraft, AS.filt_ii0);
         printf("%s", fl);
         if (ri->adsb) {
             struct adsb_stats as;
