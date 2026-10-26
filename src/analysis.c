@@ -173,14 +173,17 @@ static struct radar *radar_get(int code)
     return r;
 }
 
+/* a radar identified by its queries: II/SI code, or a plain Mode A/C radar */
+static bool known_code(int code) { return code >= 0 || code == CODE_PLAIN_AC; }
+
 double analysis_rotation(void)
 {
     struct radar *best = NULL;
     for (int r = 0; r < AS.nradars; r++) {
         struct radar *X = &AS.radars[r];
         if (AS.cfg.radar_sel >= 0 && X->code != AS.cfg.radar_sel) continue;
-        if (X->code < 0 && AS.cfg.radar_sel < 0 && best) continue;
-        if (!best || X->nbursts > best->nbursts || (best->code < 0 && X->code >= 0)) best = X;
+        if (!known_code(X->code) && AS.cfg.radar_sel < 0 && best) continue;
+        if (!best || X->nbursts > best->nbursts || (!known_code(best->code) && known_code(X->code))) best = X;
     }
     if (!best || best->np == 0) return 0;
     return median_d(best->periods, best->np < 64 ? best->np : 64);
@@ -204,8 +207,8 @@ int analysis_main_code(void)
     struct radar *best = NULL;
     for (int r = 0; r < AS.nradars; r++) {
         struct radar *X = &AS.radars[r];
-        if (!best || (best->code < 0 && X->code >= 0) ||
-            ((X->code >= 0) == (best->code >= 0) && X->nbursts > best->nbursts)) best = X;
+        if (!best || (!known_code(best->code) && known_code(X->code)) ||
+            (known_code(X->code) == known_code(best->code) && X->nbursts > best->nbursts)) best = X;
     }
     return best ? best->code : -2;
 }
@@ -757,9 +760,13 @@ static void close_burst(void)
     if (!o->open) return;
     o->open = false;
     int code = -1, bn = 0;
-    for (int c = 0; c < NCODES; c++) if (o->votes[c] > bn) { bn = o->votes[c]; code = c; }
+    /* the code sent most often in the beam; SI codes (16+) are counted first,
+     * so they win a draw against an II code */
+    for (int c = NCODES - 1; c >= 0; c--) if (o->votes[c] > bn) { bn = o->votes[c]; code = c; }
     /* IIS 0 alone: an II0 interrogator (SI radars send their code in UF11 and DI 3 too) */
     if (code < 0 && o->iis0) code = 0;
+    /* no code at all, but plain Mode A/C: a plain A/C radar */
+    if (code < 0 && o->plain) code = CODE_PLAIN_AC;
     bool valid = o->n_raw >= AS.cfg.burst_min;
 
     static struct burst rec;
@@ -830,6 +837,7 @@ static void stage1(struct interrog *x, uint64_t idx)
                 int c = modes_own_code(x);
                 if (c >= 0 && c < NCODES) o->votes[c]++;
                 else if (modes_iis0(x)) o->iis0++;
+                else if (x->kind <= K_MODED) o->plain++;
             }
         }
     }

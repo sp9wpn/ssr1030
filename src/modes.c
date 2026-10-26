@@ -107,7 +107,8 @@ int radar_code_parse(const char *s)
 
 void radar_code_str(int code, char *buf, size_t len)
 {
-    if (code < 0) snprintf(buf, len, "?");
+    if (code == -3) snprintf(buf, len, "A/C");     /* CODE_PLAIN_AC */
+    else if (code < 0) snprintf(buf, len, "?");
     else if (code < 16) snprintf(buf, len, "II%d", code);
     else snprintf(buf, len, "SI%d", (code - 16) & 63);
 }

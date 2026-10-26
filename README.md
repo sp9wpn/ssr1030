@@ -56,7 +56,9 @@ These apply to statistics, bursts, the log and `--list`. TCAS stays a separate s
 - `-r, --radar SI37|II3`: keeps one radar.
   - Mode S interrogations carry the code: UF11 has II/SI, and UF4/5/20/21 have SIS (DI=3) or IIS (DI=0/1/7).
   - IIS=0 is not proof of II0: SI-code radars send IIS=0 too, and their SI code only in UF11 and DI=3 roll-calls. So a roll-call with IIS=0 takes its burst's code, and a burst is named II0 only when IIS=0 roll-calls are all it has (for example an airport multilateration interrogator).
-  - All-call interrogations are attributed through the main-beam burst they belong to. A burst gets the majority code of the interrogations inside it.
+  - All-call interrogations are attributed through the main-beam burst they belong to.
+  - A burst is named by the II/SI code sent most often by the queries inside it; on a draw an SI code wins over an II code. Plain Mode A/C is not counted.
+  - With no II/SI code inside: II0 when it has roll-calls with IIS=0, else `A/C` (a plain Mode A/C radar) when it has plain Mode A/C queries, else `?` (for example only A/C-only all-calls, which come from a Mode S radar).
   - Plain Mode A/C (no P4) is never part of a burst that has a Mode S code, and is never attributed to it: a Mode S radar sends A/C-only all-calls instead, so plain A/C comes from another radar.
   - Outside bursts, an all-call is attributed if a UF11 was sent less than 300 µs before it.
   - Anything left unattributed is dropped.

@@ -10,6 +10,7 @@
 #define ADDR_HASH    8192
 #define RECENT_N     8
 #define NCODES       80          /* radar codes: II 0-15, SI 16+1..63 */
+#define CODE_PLAIN_AC (-3)       /* burst of a plain Mode A/C radar (no II/SI code seen) */
 #define NO_TARGET    255
 #define NO_ADDR      0xFFFFFFFFu
 #define TR_N         1024        /* distinct token transitions tracked */
@@ -68,6 +69,7 @@ struct open_burst {
     int n_raw;
     int votes[NCODES];
     int iis0;                   /* roll-calls with IIS 0: II0 only when no code was seen */
+    int plain;                  /* plain Mode A/C queries (no code) */
     bool partial;
 };
 
