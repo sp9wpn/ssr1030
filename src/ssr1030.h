@@ -84,11 +84,13 @@ struct demod_stats {
     uint64_t pulses;
     uint64_t stray_pulses;
     uint64_t garbled;      /* A/C candidates rejected in dense interference */
+    uint64_t rx, busy;     /* samples received on 1030 MHz (not ADS-B windows); of them busy: pulses and short gaps */
     float noise_dbfs;
     float thr_dbfs;
     float peak_dbfs;       /* peak since last read */
 };
 void demod_get_stats(struct demod *d, struct demod_stats *s, bool reset_peak);
+void demod_set_busy_gap(struct demod *d, double us);   /* --busy-gap */
 
 /* ---- modes.c ---- */
 uint32_t modes_crc(const uint8_t *msg, int nbits);       /* parity over nbits-24 data bits */

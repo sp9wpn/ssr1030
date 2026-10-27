@@ -358,6 +358,24 @@ static void print_seq(const struct burst *b, int cols, int maxlines)
     fputs(EL, stdout);
 }
 
+/* 1030 MHz channel use: share of received samples above the pulse threshold
+ * over the last UTIL_S seconds (one snapshot per second) */
+#define UTIL_S 60
+static double util_pct(const struct demod_stats *st, double now)
+{
+    static struct { double t; uint64_t rx, busy; } snap[UTIL_S + 2];
+    static int n;
+    if (n && now < snap[(n - 1) % (UTIL_S + 2)].t) n = 0;      /* time base restarted */
+    if (!n || now - snap[(n - 1) % (UTIL_S + 2)].t >= 1.0) {
+        int k = n++ % (UTIL_S + 2);
+        snap[k].t = now; snap[k].rx = st->rx; snap[k].busy = st->busy;
+    }
+    int first = n > UTIL_S + 2 ? n - (UTIL_S + 2) : 0;
+    while (first < n - 1 && now - snap[first % (UTIL_S + 2)].t > UTIL_S) first++;
+    uint64_t drx = st->rx - snap[first % (UTIL_S + 2)].rx;
+    return drx ? 100.0 * (double)(st->busy - snap[first % (UTIL_S + 2)].busy) / drx : NAN;
+}
+
 void display_render(const struct run_info *ri, double now, struct demod *d, uint64_t drops)
 {
     struct demod_stats st;
@@ -510,9 +528,12 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         }
         fputs(EL, stdout);
     }
-    printf("Background (sidelobe) %.1f dBFS   beam member >= %.1f   core >= %.1f   TCAS/ACAS (excluded): "
+    double util = util_pct(&st, now);
+    char ut[32] = "-";
+    if (!isnan(util)) snprintf(ut, sizeof(ut), "%.2f%%", util);
+    printf("Background (sidelobe) %.1f dBFS   beam member >= %.1f   core >= %.1f   1030 busy %s (60 s)   TCAS/ACAS (excluded): "
            GRN "%ld" R " (UF0 %ld, UF16 %ld, WS %ld; %d aircraft)" EL,
-           AS.bg_db, AS.bg_db + AS.cfg.member_db, AS.bg_db + AS.cfg.core_db,
+           AS.bg_db, AS.bg_db + AS.cfg.member_db, AS.bg_db + AS.cfg.core_db, ut,
            AS.tcas_total, AS.tcas_uf0, AS.tcas_uf16, AS.tcas_ws, AS.naddr_tcas);
     fputs(EL, stdout);
 

@@ -199,6 +199,12 @@ Military Mode 1/2 and Mode B/D are not detected. On air they were almost all coi
 
 ## Dashboard layout
 
+- **1030 busy** (on the `Background` status line): the share of time an interrogation is on air at 1030 MHz, over the last 60 s, including garbled and partial ones that were not decoded.
+  - Each detected pulse counts its length, and the gap to the previous pulse counts too when it is up to 21 µs (`--busy-gap US`; the longest gap inside an interrogation is Mode C P1–P3, 20.2 µs). So an interrogation counts from its first to its last pulse.
+  - Only pulses of interrogation width (≥ 0.6 µs; nominal 0.8 µs) within ±0.5 MHz of 1030 MHz count. The HackRF hears 16 MHz around 1030; on air, shorter blips (noise near the threshold) and pulses elsewhere in that band were most of the rest.
+  - Pulses must be above the pulse threshold (`thr` on the `Signal` line, 12 dB over noise by default), so weak signals are not counted and the figure depends on gain and antenna. Time on 1090 MHz (ADS-B windows) is left out.
+  - Check on a 12 s recording near a radar: decoded interrogations at their standard lengths (P1 to the end of the last pulse) 0.10 %, `1030 busy` 0.13 %.
+
 Below the status lines there are three columns:
 - **Interrogations:** per type, with total, in-beam, sidelobe and rate per minute (counted over the last 60 s). Mode S rows:
   - UF4 and UF5 count only plain surveillance roll-calls (answered with DF4/DF5).

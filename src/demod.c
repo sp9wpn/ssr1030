@@ -28,6 +28,9 @@
 #include <math.h>
 #include "ssr1030.h"
 
+#define BUSY_GAP_US 21.0           /* longest gap inside an interrogation: Mode C P1-P3 is 20.2 us */
+#define BUSY_MIN_US 0.6            /* busy pulses: interrogation pulses are 0.8 us (+-0.1) */
+#define BUSY_MAX_HZ 0.5e6          /* ... and within this of 1030 MHz */
 #define RING_BITS   20
 #define RING        (1u << RING_BITS)
 #define RMASK       (RING - 1)
@@ -65,6 +68,9 @@ struct demod {
     uint64_t seq;
 
     uint64_t clipped, pulses, stray;
+    uint64_t rx, busy;          /* samples received on 1030 MHz; of them busy (see busy_gap) */
+    uint64_t busy_end;          /* end (sample index) of the last pulse counted as busy */
+    uint64_t busy_gap;          /* samples: a gap this short between pulses is busy too */
     float peak;
     float *tmp;
 };
@@ -81,6 +87,7 @@ struct demod *demod_new(double fs, float thr_db, float thr_abs, float modes_db, 
     d->thr_abs = thr_abs;
     d->dens_max = dens_max;
     d->noise = -1;
+    d->busy_gap = (uint64_t)lround(BUSY_GAP_US * d->spus);
     d->merge_gap = (int)lround(0.25 * d->spus);
     if (d->merge_gap < 2) d->merge_gap = 2;
     d->min_len = (int)lround(0.3 * d->spus);
@@ -502,6 +509,20 @@ static void finish_pulse(struct demod *d, const struct seg *g, bool strong)
 
     struct pulse np = { .lead = lead, .width = (trail - lead) / d->spus, .amp = amp, .strong = strong };
     if (strong) {
+        /* channel busy: each pulse, plus the gap from the previous pulse when it
+         * is up to busy_gap (inside an interrogation, also a garbled or partial
+         * one). Only pulses of interrogation width on 1030 MHz count: on air,
+         * shorter blips (noise near the threshold) and pulses elsewhere in the
+         * received band were most of the rest */
+        uint64_t pe = e + 1;
+        float complex rot = 0;
+        for (uint64_t k = s + 1; k <= e; k++) rot += Z(d, k) * conjf(Z(d, k - 1));
+        double off_hz = cargf(rot) * d->fs / (2 * M_PI);
+        if (np.width >= BUSY_MIN_US && fabs(off_hz) < BUSY_MAX_HZ) {
+            if (d->busy_end && s <= d->busy_end + d->busy_gap) { if (pe > d->busy_end) d->busy += pe - d->busy_end; }
+            else d->busy += pe - s;
+            if (pe > d->busy_end) d->busy_end = pe;
+        }
         /* strong pulses in the preceding 1 ms */
         while (d->qdens < d->ns && lead - d->sleads[d->qdens % QN] > 1000.0 * d->spus) d->qdens++;
         if (d->qdens + QN <= d->ns) d->qdens = d->ns - QN + 1;
@@ -572,6 +593,7 @@ void demod_process(struct demod *d, const int8_t *iq, size_t ns)
         segment(d, &d->hi, a, idx, d->thr, 0, true);
         if (d->thr_lo < d->thr) segment(d, &d->lo, a, idx, d->thr_lo, SEG_REL, false);
     }
+    d->rx += ns;
     if (d->ncnt > 1000) {
         /* mean of a Rayleigh distribution truncated at 2.5x mean is ~0.93 x mean */
         float nb = (float)(d->nacc / d->ncnt) / 0.93f;
@@ -588,10 +610,14 @@ void demod_flush(struct demod *d)
     assemble(d, true);
 }
 
+void demod_set_busy_gap(struct demod *d, double us) { d->busy_gap = (uint64_t)lround(us * d->spus); }
+
 void demod_get_stats(struct demod *d, struct demod_stats *s, bool reset_peak)
 {
     s->samples = d->n;
     s->clipped = d->clipped;
+    s->rx = d->rx;
+    s->busy = d->busy;
     s->pulses = d->pulses;
     s->stray_pulses = d->stray;
     s->garbled = d->garbled;

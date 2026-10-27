@@ -26,6 +26,7 @@ static struct {
     double freq, fs;
     int lna, vga, amp;
     float thr_db, thr_abs, modes_db;
+    double busy_gap;                /* --busy-gap, us; < 0: default */
     int dens_max;
     const char *file, *record, *log, *serial, *adsb_db, *rx1090, *radar_pos, *rx_pos;
     char sep;
@@ -41,7 +42,7 @@ static struct {
     struct analysis_cfg acfg;
 } opt = {
     .freq = 1030e6, .fs = 16e6, .lna = 32, .vga = 24, .amp = 0,
-    .thr_db = 12, .modes_db = 7, .dens_max = 50, .sep = ',',
+    .thr_db = 12, .modes_db = 7, .busy_gap = -1, .dens_max = 50, .sep = ',',
     .adsb_every = 30, .adsb_dwell = 2.9, .adsb_gain = 64, .lol_radius = 150,
     .agc = true,
     .acfg = { .burst_gap = 0.030, .burst_min = 3, .member_db = 3, .core_db = 6,
@@ -689,6 +690,8 @@ static void usage(void)
 "  -d, --dashboard        dashboard also in --file mode (default: summary only)\n"
 "  -q, --quiet            no live output; summary at exit\n"
 "      --graph-floor DB   burst graph bar scale starts at this dBFS (default -45; ends at +3)\n"
+"      --busy-gap US      1030 busy: a gap between pulses up to this long counts as one\n"
+"                         interrogation going on (default 21, Mode C P1-P3 is 20.2)\n"
 "  -h, --human            Comm-B requests by short name (trk, selAlt, ...) instead of the uplink\n"
 "                         format and register (UF4b50, UF5b20, UF20b60)\n"
 "      --help             this text\n\n"
@@ -718,7 +721,7 @@ int main(int argc, char **argv)
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
         { "no-auto-gain", 0, 0, 17 }, { "rx1090", 2, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
-        { "beep", 0, 0, 22 }, { "no-1090-sync", 0, 0, 23 }, { "adsb-gain", 1, 0, 24 }, { "graph-floor", 1, 0, 26 },
+        { "beep", 0, 0, 22 }, { "no-1090-sync", 0, 0, 23 }, { "adsb-gain", 1, 0, 24 }, { "graph-floor", 1, 0, 26 }, { "busy-gap", 1, 0, 27 },
         { "human", 0, 0, 'h' }, { "help", 0, 0, 25 }, { 0, 0, 0, 0 }
     };
     int c;
@@ -740,6 +743,7 @@ int main(int argc, char **argv)
         case 23: opt.no_sync = true; break;
         case 24: opt.adsb_gain = atoi(optarg); break;
         case 26: display_set_graph_floor((float)atof(optarg)); break;
+        case 27: opt.busy_gap = atof(optarg); break;
         case 5: opt.dens_max = atoi(optarg); break;
         case 6: opt.acfg.burst_gap = atof(optarg) / 1e3; break;
         case 7: opt.acfg.burst_min = atoi(optarg); break;
@@ -842,6 +846,7 @@ int main(int argc, char **argv)
     analysis_set_gain(gain_total(cur_gain));
     analysis_set_sink(sink);
     struct demod *d = demod_new(opt.fs, opt.thr_db, opt.thr_abs, opt.modes_db, opt.dens_max, on_interrog, NULL);
+    if (opt.busy_gap >= 0) demod_set_busy_gap(d, opt.busy_gap);
 
     int fd = -1;
     hackrf_device *dev = NULL;
