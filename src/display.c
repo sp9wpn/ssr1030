@@ -561,13 +561,25 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     if (nl == 1) snprintf(left[nl++], 80, DIM "(no radar interrogations yet)" R);
 
     snprintf(mid[nm++], 96, B "%-14s %7s %7s %6s %5s" R, "Comm-B BDS", "total", "in-beam", "sidelb", "/min");
-    for (int b = 0; b < 256 && nm < 24; b++) {
+    /* registers below KROW_MIN_SHARE of all Comm-B requests (mostly misdecoded
+     * queries) add up in one "BDS other" row, like the left table */
+    long ball = 0, both[3] = { 0 };
+    float both_rate = 0;
+    for (int b = 0; b < 256; b++) ball += AS.bds[b];
+    for (int b = 0; b < 256; b++) {
         if (!AS.bds[b]) continue;
+        if (AS.bds[b] < KROW_MIN_SHARE * ball || nm >= 23) {
+            both[0] += AS.bds[b]; both[1] += AS.bds_inbeam[b]; both[2] += AS.bds_side[b];
+            both_rate += bds_rate[b];
+            continue;
+        }
         const char *ab = bds_abbrev(b);
         char lab[16];
         snprintf(lab, sizeof(lab), "%X,%X %s", b >> 4, b & 15, ab && bds_human ? ab : "");
         snprintf(mid[nm++], 96, "%-14s %7ld %7ld %6ld %5.0f", lab, AS.bds[b], AS.bds_inbeam[b], AS.bds_side[b], bds_rate[b]);
     }
+    if (both[0])
+        snprintf(mid[nm++], 96, "%-14s %7ld %7ld %6ld %5.0f", "BDS other", both[0], both[1], both[2], both_rate);
     if (nm == 1) snprintf(mid[nm++], 96, DIM "(no Comm-B requests yet)" R);
 
     snprintf(right[nr++], 160, B "Radar  bursts rotation  dwell  per burst" R);
