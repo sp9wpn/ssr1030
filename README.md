@@ -212,7 +212,7 @@ Below the status lines there are three columns:
   - UF11 has its own row. UF19, UF20, UF21, UF24 and unknown formats share `UF other`. TCAS (UF0/UF16) is counted on its own line.
   - Always shown when non-zero: A/C-only all-calls, UF4, UF5, UF11, the two Comm-B rows, `UF other` and Mode S no sync. Other types (Mode 1/2/A/B/C/D, A/C/S all-calls, other intermode) get their own row only from 2% of all interrogations; below that they add up in `other (< 2% each)`.
   - The summary printed at exit uses the same rows.
-- **Comm-B BDS:** per requested register, with register and shortcode (`4,0 selAlt`), total, in-beam, sidelobe and rate per minute.
+- **Comm-B BDS:** per requested register, with register and shortcode (`4,0 selAlt`), total, in-beam, sidelobe and rate per minute. Registers below 2% of all Comm-B requests (mostly misdecoded queries) add up in `BDS other`; the summary printed at exit still lists every register.
 - **Radars:** one line each with bursts, rotation, dwell and interrogations per burst. UF11 codes, DI/PC and roll-called aircraft are in the exit summary.
 
 The three columns need about 150 terminal columns. Below them come the burst table, the last burst sequence, the interleaving table and the recent interrogations.
@@ -404,7 +404,7 @@ A separate program: it reads a Beast stream (dump1090, readsb, …) and prints t
   - Until a QNH is known, the pressure altitude is shown with `STD`.
 - **Time:** the receiver's 12 MHz timestamps, placed on the computer's clock, so the times are not bunched by dump1090's network batching.
 - `--max-alt FT`: hides aircraft above this pressure altitude (standard 1013.25, not AMSL), and aircraft with no altitude in the last minute.
-- `-A LIST`: only these aircraft, by hex address or callsign, separated by commas (`-A 48af10,LOT3TD`, case does not matter). A callsign matches once the aircraft's ADS-B identification has been heard.
+- `-A LIST`: only these aircraft, by hex address or callsign, separated by commas (`-A 48af10,LOT3TD`, case does not matter). A callsign matches once the aircraft's ADS-B identification has been heard. An aircraft given as hex is decoded even if it never sent ADS-B: without an ADS-B velocity to check against, every field of the register must be present (BDS 5,0 roll, track, GS and TAS; BDS 6,0 heading, IAS, Mach and a vertical rate, IAS and Mach consistent with the altitude), and the line ends `(no ADS-B check)`. Such decodes are less certain.
 - `-v`: counts every minute on stderr (Comm-B replies, unknown aircraft, BDS 5,0, BDS 6,0, above `--max-alt`, other aircraft (`-A`), ambiguous (both), neither).
 
 ## License

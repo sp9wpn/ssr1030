@@ -246,7 +246,20 @@ static double angdiff(double a, double b)
 struct b50 { bool roll_ok, trk_ok, gs_ok, rate_ok, tas_ok; double roll, trk, gs, rate, tas; };
 struct b60 { bool hdg_ok, ias_ok, mach_ok, baro_ok, ins_ok; double hdg, ias, mach, baro, ins; };
 
-static bool is50(const uint8_t *m, const struct ac *a, double t, struct b50 *o)
+/* -A lists this address as hex: its replies are decoded even without ADS-B */
+static bool hex_given(uint32_t addr)
+{
+    for (int k = 0; k < nsel; k++) {
+        char *e;
+        unsigned long v = strtoul(sel[k], &e, 16);
+        if (strlen(sel[k]) == 6 && !*e && v == addr) return true;
+    }
+    return false;
+}
+
+/* ref: an ADS-B velocity to check against. Without one (an aircraft given as
+ * hex with -A and no recent ADS-B), every field must be present instead */
+static bool is50(const uint8_t *m, const struct ac *a, bool ref, struct b50 *o)
 {
     if (!field_ok(m, 33, 43) || !field_ok(m, 44, 55) || !field_ok(m, 56, 66) || !field_ok(m, 67, 77) || !field_ok(m, 78, 88))
         return false;
@@ -260,7 +273,7 @@ static bool is50(const uint8_t *m, const struct ac *a, double t, struct b50 *o)
     if (o->gs < 40 || o->gs > 700) return false;
     if (o->tas_ok && (o->tas < 40 || o->tas > 600 || fabs(o->gs - o->tas) > 200)) return false;
     if (o->rate_ok && fabs(o->rate) > 8) return false;
-    if (t - a->vel_t > VEL_AGE) return false;
+    if (!ref) return o->roll_ok && o->tas_ok;
     return fabs(o->gs - a->gs) <= 25 && angdiff(o->trk, a->trk) <= 12;
 }
 
@@ -280,7 +293,7 @@ static double sound_kt(double alt_ft)
     return 38.967854 * sqrt(tk);
 }
 
-static bool is60(const uint8_t *m, const struct ac *a, double t, struct b60 *o)
+static bool is60(const uint8_t *m, const struct ac *a, double t, bool ref, struct b60 *o)
 {
     if (!field_ok(m, 33, 44) || !field_ok(m, 45, 55) || !field_ok(m, 56, 66) || !field_ok(m, 67, 77) || !field_ok(m, 78, 88))
         return false;
@@ -295,11 +308,13 @@ static bool is60(const uint8_t *m, const struct ac *a, double t, struct b60 *o)
     if (o->baro_ok && fabs(o->baro) > 6000) return false;
     if (o->ins_ok && fabs(o->ins) > 6000) return false;
     if (o->baro_ok && o->ins_ok && fabs(o->baro - o->ins) > 2000) return false;
-    if (t - a->vel_t > VEL_AGE) return false;
+    bool alt = t - a->alt_t <= ALT_AGE;
+    if (!ref)
+        return o->ias_ok && o->mach_ok && (o->baro_ok || o->ins_ok) &&
+               (!alt || fabs(cas_to_mach(o->ias, a->alt) - o->mach) <= 0.04);
     if (angdiff(o->hdg, a->trk) > 40) return false;             /* wind correction angle */
     if (a->vr_ok && o->ins_ok && fabs(o->ins - a->vr) > 1500) return false;
     if (a->vr_ok && !o->ins_ok && o->baro_ok && fabs(o->baro - a->vr) > 2000) return false;
-    bool alt = t - a->alt_t <= ALT_AGE;
     if (o->ias_ok && o->mach_ok && alt && fabs(cas_to_mach(o->ias, a->alt) - o->mach) > 0.04) return false;
     double m_ = o->mach_ok ? o->mach : alt ? cas_to_mach(o->ias, a->alt) : NAN;
     if (alt && !isnan(m_) && fabs(m_ * sound_kt(a->alt) - a->gs) > 200) return false;   /* TAS vs ground speed: wind */
@@ -352,13 +367,18 @@ static bool selected(const struct ac *a)
 static void commb(const uint8_t *m, int df, double t)
 {
     n_commb++;
-    struct ac *a = ac_get(crc(m, 112), false);
-    if (!a || t - a->seen > KNOWN_AGE) { n_unknown++; return; }
+    uint32_t addr = crc(m, 112);
+    struct ac *a = ac_get(addr, false);
+    bool given = hex_given(addr);
+    if ((!a || t - a->seen > KNOWN_AGE) && !given) { n_unknown++; return; }
+    if (!a && !(a = ac_get(addr, true))) return;
     if (df == 20) set_alt(a, ac13_ft(getbits(m, 20, 32)), t);
     bds40(m, a, t);
     struct b50 f5;
     struct b60 f6;
-    bool r5 = is50(m, a, t, &f5), r6 = is60(m, a, t, &f6);
+    bool ref = t - a->vel_t <= VEL_AGE;
+    if (!ref && !given) { n_none++; return; }
+    bool r5 = is50(m, a, ref, &f5), r6 = is60(m, a, t, ref, &f6);
     if (!r5 && !r6) { n_none++; return; }
     /* altitude filter: above it, or not known, not shown */
     if (max_alt != INT32_MAX && (t - a->alt_t > ALT_AGE || a->alt > max_alt)) { n_high++; return; }
@@ -376,7 +396,7 @@ static void commb(const uint8_t *m, int df, double t)
         o += snprintf(body + o, sizeof(body) - o, "  track %5.1f°  GS %3.0f kt", f5.trk, f5.gs);
         if (f5.tas_ok) o += snprintf(body + o, sizeof(body) - o, "  TAS %3.0f kt", f5.tas);
         if (f5.rate_ok) snprintf(body + o, sizeof(body) - o, "  turn %+.2f°/s", f5.rate);
-        printf("%s  %s\n", head, body);
+        printf("%s  %s%s\n", head, body, ref ? "" : "  (no ADS-B check)");
     }
     if (r6) {
         int o = snprintf(body, sizeof(body), "BDS6,0%s hdg %5.1f°", mark, f6.hdg);
@@ -384,7 +404,7 @@ static void commb(const uint8_t *m, int df, double t)
         if (f6.mach_ok) o += snprintf(body + o, sizeof(body) - o, "  M%.3f", f6.mach);
         if (f6.baro_ok) o += snprintf(body + o, sizeof(body) - o, "  baro %+5.0f ft/min", f6.baro);
         if (f6.ins_ok) snprintf(body + o, sizeof(body) - o, "  inertial %+5.0f ft/min", f6.ins);
-        printf("%s  %s\n", head, body);
+        printf("%s  %s%s\n", head, body, ref ? "" : "  (no ADS-B check)");
     }
     fflush(stdout);
 }
@@ -395,8 +415,10 @@ static void frame(const uint8_t *m, int len, double t)
     if (len == 14 && (df == 17) && crc(m, 112) == 0) df17(m, t);
     else if (len == 14 && (df == 20 || df == 21)) commb(m, df, t);
     else if (len == 7 && (df == 0 || df == 4)) {
-        struct ac *a = ac_get(crc(m, 56), false);
-        if (a && t - a->seen <= KNOWN_AGE) set_alt(a, ac13_ft(getbits(m, 20, 32)), t);
+        uint32_t addr = crc(m, 56);
+        struct ac *a = ac_get(addr, false);
+        if (!a && hex_given(addr)) a = ac_get(addr, true);
+        if (a && (t - a->seen <= KNOWN_AGE || hex_given(addr))) set_alt(a, ac13_ft(getbits(m, 20, 32)), t);
     }
 }
 
@@ -479,7 +501,9 @@ static void usage(void)
             "              or the pressure altitude (STD) until one is seen\n"
             "  --max-alt FT  hide aircraft above this pressure altitude (or with no altitude known)\n"
             "  -A LIST     only these aircraft: hex addresses or callsigns, separated by commas\n"
-            "              (e.g. -A 48af10,LOT3TD; a callsign matches once its ADS-B identification is heard)\n"
+            "              (e.g. -A 48af10,LOT3TD; a callsign matches once its ADS-B identification is heard).\n"
+            "              An aircraft given as hex is decoded also without ADS-B: then all fields of the\n"
+            "              register must be present, and the line ends '(no ADS-B check)'\n"
             "  -v          statistics every minute on stderr\n"
             "Prints Comm-B replies of ADS-B aircraft that are BDS 5,0 or 6,0, one per line.\n", QNH_MAX_FT);
 }
