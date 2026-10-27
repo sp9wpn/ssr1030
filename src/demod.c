@@ -31,6 +31,9 @@
 #define BUSY_GAP_US 21.0           /* longest gap inside an interrogation: Mode C P1-P3 is 20.2 us */
 #define BUSY_MIN_US 0.6            /* busy pulses: interrogation pulses are 0.8 us (+-0.1) */
 #define BUSY_MAX_HZ 0.5e6          /* ... and within this of 1030 MHz */
+#define MODES_MAX_HZ 0.5e6         /* Mode S P6 further than this from 1030 MHz (radars must stay within
+                                      0.2 MHz, TCAS within 0.01 MHz) ... */
+#define MODES_OFF_Q  0.1f          /* ... with bit quality below this: not an interrogation */
 #define RING_BITS   20
 #define RING        (1u << RING_BITS)
 #define RMASK       (RING - 1)
@@ -68,6 +71,7 @@ struct demod {
     uint64_t seq;
 
     uint64_t clipped, pulses, stray;
+    uint64_t offchan;           /* Mode S candidates rejected as off-channel */
     uint64_t rx, busy;          /* samples received on 1030 MHz; of them busy (see busy_gap) */
     uint64_t busy_end;          /* end (sample index) of the last pulse counted as busy */
     uint64_t busy_gap;          /* samples: a gap this short between pulses is busy too */
@@ -175,6 +179,24 @@ static float p6_level(struct demod *d, double p6lead, double p6width, double ts)
     if (n < 8) return 0;
     qsort(d->tmp, n, sizeof(float), cmpf);
     return d->tmp[(n * 7) / 10];
+}
+
+/* carrier offset over P6, Hz: median phase step between neighbouring samples
+ * above half the P6 level. The median ignores the DPSK phase reversals and
+ * the noisy samples around them (an average over the squared signal was
+ * biased by hundreds of kHz on weak P6) */
+static double p6_offset_hz(struct demod *d, double p6lead, double p6width)
+{
+    uint64_t a = (uint64_t)llround(p6lead + 0.3 * d->spus), b = (uint64_t)llround(p6lead + (p6width - 0.3) * d->spus);
+    float hl = 0;
+    for (uint64_t k = a; k < b; k++) if (M(d, k) > hl) hl = M(d, k);
+    hl *= 0.5f;
+    int n = 0;
+    for (uint64_t k = a + 1; k < b && n < d->max_len; k++)
+        if (M(d, k) > hl && M(d, k - 1) > hl) d->tmp[n++] = cargf(Z(d, k) * conjf(Z(d, k - 1)));
+    if (n < 8) return 0;
+    qsort(d->tmp, n, sizeof(float), cmpf);
+    return d->tmp[n / 2] * d->fs / (2 * M_PI);
 }
 
 static void decode_modes(struct demod *d, struct interrog *it, double p6lead, double p6width)
@@ -393,6 +415,14 @@ static void match(struct demod *d, uint64_t i)
                 decode_modes(d, &it, p6->lead, w6);
                 p1->used = p2->used = true;
                 for (uint64_t k = i + j6; k <= last; k++) d->q[k & QMASK].used = true;
+                /* a P1-P2-P6 look-alike on another frequency (seen: a 1 kHz pulse
+                 * train 1.3 MHz below, decoded as UF0/UF1 with random addresses and
+                 * mostly zero bits). Off-channel alone is not enough: weak real
+                 * queries measure up to ~0.7 MHz off, but their bits are clean */
+                if ((it.kind == K_S_NOSYNC || it.quality < MODES_OFF_Q) && fabs(p6_offset_hz(d, p6->lead, w6)) > MODES_MAX_HZ) {
+                    d->offchan++;
+                    return;
+                }
                 /* the other segmenter's copies of P1 and P2 */
                 for (uint64_t k = i > d->qtail + 8 ? i - 8 : d->qtail; k < i + j6; k++) {
                     struct pulse *p = &d->q[k & QMASK];
@@ -621,6 +651,7 @@ void demod_get_stats(struct demod *d, struct demod_stats *s, bool reset_peak)
     s->pulses = d->pulses;
     s->stray_pulses = d->stray;
     s->garbled = d->garbled;
+    s->offchan = d->offchan;
     s->noise_dbfs = dbfs(d->noise);
     s->thr_dbfs = dbfs(d->thr);
     s->peak_dbfs = dbfs(d->peak);

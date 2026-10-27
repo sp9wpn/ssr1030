@@ -260,6 +260,13 @@ Mode S is also decoded from pulses down to `--modes-threshold` dB above noise (d
 - **Effect (12 s recording, 7 dB):** UF11 32 instead of 14, all with correct parity; roll-calls 50 instead of 16, 30 of them through sidelobes. Mode A/C unchanged, except 8 "A/C" that were pieces of weak Mode S.
 - `--modes-threshold 12` (equal to `--threshold`) turns it off.
 
+### Off-channel Mode S
+
+The HackRF receives 16 MHz around 1030 MHz, and the pulse detector has no channel filter. A P1-P2-P6 look-alike on another frequency can therefore start a Mode S decode. Its unmodulated P6 reads as mostly zero bits, so it shows up as UF0 (TCAS) or `UF other` with random addresses. UF0 and roll-calls carry no checkable parity (it is overlaid with the address), so the parity check cannot catch it.
+- **Rule:** the carrier frequency of P6 is measured (median phase step between samples). A candidate more than 0.5 MHz from 1030 MHz *and* with bit quality below 0.1 (or no sync) is dropped and counted as `off-channel` (on the `Signal` line and in the exit summary). Radars must stay within 0.2 MHz of 1030 and TCAS within 0.01 MHz.
+- **Why both conditions:** weak real roll-calls (around −26 dBFS) measured up to ~0.7 MHz off, but their bits are clean (quality 0.4–0.6).
+- **Seen on air:** a signal about 1.34 MHz below 1030, in groups of 2–8 transmissions 1 ms apart, once per second at a fixed point of the second (so a GPS-disciplined source; unknown which). In 20 s it gave 150 fake UF0 and 50 fake `UF other`, and doubled the TCAS aircraft count. The rule removed them; UF4/UF5/UF11 counts stayed the same.
+
 Each interrogation also carries these flags:
 - **SLS:** P2 ≥ P1 (A/C), or P5 ≥ P6 (Mode S). Both mean a sidelobe.
 - **P2 level:** P2 relative to P1, in dB.

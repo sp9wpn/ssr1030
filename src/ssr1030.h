@@ -84,6 +84,7 @@ struct demod_stats {
     uint64_t pulses;
     uint64_t stray_pulses;
     uint64_t garbled;      /* A/C candidates rejected in dense interference */
+    uint64_t offchan;      /* Mode S candidates rejected: P6 more than 0.5 MHz from 1030 MHz */
     uint64_t rx, busy;     /* samples received on 1030 MHz (not ADS-B windows); of them busy: pulses and short gaps */
     float noise_dbfs;
     float thr_dbfs;

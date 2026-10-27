@@ -1077,9 +1077,9 @@ int main(int argc, char **argv)
                 opt.agc ? "automatic" : "manual", gain_changes, gain_changes ? " (last: " : "",
                 gain_changes ? gain_why : "", gain_changes ? ")" : "");
     fprintf(sf, "\nnoise %.1f dBFS, threshold %.1f dBFS, %lu pulses, %lu unmatched, %lu interference-rejected, "
-                "clipped samples %.4f%%, USB drops %lu\n",
+                "%lu off-channel Mode S, clipped samples %.4f%%, USB drops %lu\n",
             st.noise_dbfs, st.thr_dbfs, (unsigned long)st.pulses, (unsigned long)st.stray_pulses,
-            (unsigned long)st.garbled, st.samples ? 100.0 * st.clipped / st.samples : 0, (unsigned long)drops);
+            (unsigned long)st.garbled, (unsigned long)st.offchan, st.samples ? 100.0 * st.clipped / st.samples : 0, (unsigned long)drops);
     if (opt.adsb) {
         struct adsb_stats as;
         adsb_get_stats(&as);

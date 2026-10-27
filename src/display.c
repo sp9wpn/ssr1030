@@ -468,10 +468,10 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         fputs(EL, stdout);
     }
     printf("Signal: noise %.1f dBFS  thr %.1f  peak %s%.1f" R " (last %.0f s: %s%.1f" R ")  clip %s%.4f%%" R
-           " (last %.0f s: %.4f%%)  pulses %.0f/s  interf-rejected %lu",
+           " (last %.0f s: %.4f%%)  pulses %.0f/s  interf-rejected %lu  off-channel %lu",
            st.noise_dbfs, st.thr_dbfs, clip_pct > 0.0005 ? RED : "", st.peak_dbfs, win,
            clipping ? RED : "", peak_w, clip_pct > 0.0005 ? RED : "", clip_pct, win, clip_w_pct, pps,
-           (unsigned long)st.garbled);
+           (unsigned long)st.garbled, (unsigned long)st.offchan);
     if (drops) printf("  " RED "USB drops %lu" R, (unsigned long)drops);
     fputs(EL, stdout);
     if (ri->agc && ri->live)
