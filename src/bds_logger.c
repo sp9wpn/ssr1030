@@ -340,7 +340,7 @@ static void bds40(const uint8_t *m, const struct ac *a, double t)
         fprintf(stderr, "# QNH %.1f hPa (from BDS 4,0 of %06x %s, %d ft)\n", after, a->addr, a->cs, a->alt);
 }
 
-static void print_head(const struct ac *a, double t, char *buf, size_t n)
+static void print_head(const struct ac *a, double t, double rssi, char *buf, size_t n)
 {
     time_t s = (time_t)t;
     struct tm tm;
@@ -348,9 +348,11 @@ static void print_head(const struct ac *a, double t, char *buf, size_t n)
     int o = snprintf(buf, n, "%02d:%02d:%02d.%03d  %06x  %-8s  ", tm.tm_hour, tm.tm_min, tm.tm_sec,
                      (int)((t - floor(t)) * 1000), a->addr, a->cs[0] ? a->cs : "-");
     double q = qnh_now(t);
-    if (t - a->alt_t > ALT_AGE) snprintf(buf + o, n - o, "%14s", "alt ?");
-    else if (isnan(q)) snprintf(buf + o, n - o, "%8d ft STD", a->alt);
-    else snprintf(buf + o, n - o, "%9.0f ft   ", amsl_ft(a->alt, q));
+    if (t - a->alt_t > ALT_AGE) o += snprintf(buf + o, n - o, "%14s", "alt ?");
+    else if (isnan(q)) o += snprintf(buf + o, n - o, "%8d ft STD", a->alt);
+    else o += snprintf(buf + o, n - o, "%9.0f ft   ", amsl_ft(a->alt, q));
+    if (isnan(rssi)) snprintf(buf + o, n - o, "  %9s", "-");
+    else snprintf(buf + o, n - o, "  %5.1f dBFS", rssi);
 }
 
 /* -A: the aircraft's hex address or callsign is in the list */
@@ -364,7 +366,7 @@ static bool selected(const struct ac *a)
     return false;
 }
 
-static void commb(const uint8_t *m, int df, double t)
+static void commb(const uint8_t *m, int df, double t, double rssi)
 {
     n_commb++;
     uint32_t addr = crc(m, 112);
@@ -389,7 +391,7 @@ static void commb(const uint8_t *m, int df, double t)
     else if (r5) n_50++;
     else n_60++;
     char head[96], body[256];
-    print_head(a, t, head, sizeof(head));
+    print_head(a, t, rssi, head, sizeof(head));
     if (r5) {
         int o = snprintf(body, sizeof(body), "BDS5,0%s", mark);
         if (f5.roll_ok) o += snprintf(body + o, sizeof(body) - o, " roll %+5.1f°", f5.roll);
@@ -409,11 +411,12 @@ static void commb(const uint8_t *m, int df, double t)
     fflush(stdout);
 }
 
-static void frame(const uint8_t *m, int len, double t)
+/* rssi: received level from the Beast signal byte, dBFS (NAN when the receiver gives none) */
+static void frame(const uint8_t *m, int len, double t, double rssi)
 {
     int df = m[0] >> 3;
     if (len == 14 && (df == 17) && crc(m, 112) == 0) df17(m, t);
-    else if (len == 14 && (df == 20 || df == 21)) commb(m, df, t);
+    else if (len == 14 && (df == 20 || df == 21)) commb(m, df, t, rssi);
     else if (len == 7 && (df == 0 || df == 4)) {
         uint32_t addr = crc(m, 56);
         struct ac *a = ac_get(addr, false);
@@ -479,7 +482,8 @@ static void beast(int fd)
             esc = false;
             f[got++] = c;
             if (got == need) {
-                if (need > 9) frame(f + 7, need - 7, frame_time(f));
+                /* signal byte: sqrt of the signal power (full scale 1) x 255, as dump1090 writes it */
+                if (need > 9) frame(f + 7, need - 7, frame_time(f), f[6] ? 20 * log10(f[6] / 255.0) : NAN);
                 st = 0;
             }
         }

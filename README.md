@@ -395,8 +395,8 @@ A separate program: it reads a Beast stream (dump1090, readsb, …) and prints t
 ```
 
 ```
-22:21:07.981  48e973  LOT3TD         2361 ft     BDS5,0  roll  -0.4°  track 331.9°  GS 172 kt  TAS 184 kt  turn +0.03°/s
-22:21:07.988  48e973  LOT3TD         2361 ft     BDS6,0  hdg 323.1°  IAS 181 kt  M0.284  baro  -928 ft/min  inertial  -896 ft/min
+18:57:34.655  471d69  -            35000 ft STD   -6.0 dBFS  BDS5,0  roll  +0.5°  track  11.1°  GS 422 kt  TAS 444 kt  turn +0.03°/s
+18:57:34.664  471d69  -            35000 ft STD   -5.9 dBFS  BDS6,0  hdg   6.5°  IAS 260 kt  M0.768  baro  -192 ft/min  inertial    +0 ft/min
 ```
 
 - **Which register:** a Comm-B reply does not say which register it holds (that is in the interrogation, which a 1090 receiver does not hear), so it is inferred from the content, as in pyModeS:
@@ -409,6 +409,7 @@ A separate program: it reads a Beast stream (dump1090, readsb, …) and prints t
   - `--qnh HPA` sets the QNH.
   - Otherwise it comes from BDS 4,0 replies (barometric setting) of aircraft below 4000 ft whose setting is not standard (1013.2), as the median of the last 16 within 30 minutes. Each change is noted on stderr (`# QNH 1021.0 hPa (from BDS 4,0 of …)`).
   - Until a QNH is known, the pressure altitude is shown with `STD`.
+- **Signal:** the received level of each reply in dBFS, from the Beast signal byte (dump1090 writes the square root of the signal power, full scale 1, times 255). It depends on the receiver's gain (with `--enable-agc` it changes over time); `-` when the receiver gives no level.
 - **Time:** the receiver's 12 MHz timestamps, placed on the computer's clock, so the times are not bunched by dump1090's network batching.
 - `--max-alt FT`: hides aircraft above this pressure altitude (standard 1013.25, not AMSL), and aircraft with no altitude in the last minute.
 - `-A LIST`: only these aircraft, by hex address or callsign, separated by commas (`-A 48af10,LOT3TD`, case does not matter). A callsign matches once the aircraft's ADS-B identification has been heard. An aircraft given as hex is decoded even if it never sent ADS-B: without an ADS-B velocity to check against, every field of the register must be present (BDS 5,0 roll, track, GS and TAS; BDS 6,0 heading, IAS, Mach and a vertical rate, IAS and Mach consistent with the altitude), and the line ends `(no ADS-B check)`. Such decodes are less certain.
