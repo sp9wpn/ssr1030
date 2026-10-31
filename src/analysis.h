@@ -44,9 +44,10 @@ struct burst {
     int code;               /* radar code, -1 unknown */
     char key[12];           /* "SI17", "II3", "?" */
     bool partial;           /* touched an ADS-B gap: excluded from per-burst stats */
-    double t0, t1, tpeak;
+    double t0, t1, tpeak;   /* all members, before the filters */
     float peak;
-    int n;
+    int nall;               /* members before the filters */
+    int n;                  /* members that passed the filters: cnt, gcnt, sequence */
     int cnt[K_COUNT];
     int gcnt[G_COUNT];      /* by query type (tok_group) */
     uint16_t ks[SEQ_MAX];   /* sequence tokens (seq_token) in arrival order */

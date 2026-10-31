@@ -461,13 +461,20 @@ static bool is_core(const struct interrog *x)
     return is_member(x) && x->amp_db >= AS.bg_db + AS.cfg.core_db;
 }
 
-static int rec_add(struct burst *b, const struct interrog *x)
+/* burst span and peak from every member: the filters must not change where
+ * a burst is, its radar's rotation or dwell */
+static void rec_span(struct burst *b, const struct interrog *x)
 {
-    if (b->n == 0) { b->t0 = x->t; b->peak = -99; }
-    b->n++;
-    b->cnt[x->kind]++;
+    if (b->nall++ == 0) { b->t0 = x->t; b->peak = -99; }
     b->t1 = x->t;
     if (x->amp_db > b->peak) { b->peak = x->amp_db; b->tpeak = x->t; }
+}
+
+/* a member that passed the filters: counts, sequence, targets */
+static int rec_add(struct burst *b, const struct interrog *x)
+{
+    b->n++;
+    b->cnt[x->kind]++;
     uint16_t tok = seq_token(x);
     b->gcnt[tok_group(tok)]++;
     int k = NO_TARGET;
@@ -647,6 +654,11 @@ const struct burst *analysis_graph_burst(void)
     if (!AS.nhist) return NULL;
     int code = analysis_main_code();
     int lim = AS.nhist < BURST_HIST ? AS.nhist : BURST_HIST;
+    /* the newest burst of the main radar that shows something after the filters */
+    for (int i = 0; i < lim; i++) {
+        const struct burst *b = &AS.hist[(AS.nhist - 1 - i) % BURST_HIST];
+        if (b->code == code && b->n > 0) return b;
+    }
     for (int i = 0; i < lim; i++) {
         const struct burst *b = &AS.hist[(AS.nhist - 1 - i) % BURST_HIST];
         if (b->code == code) return b;
@@ -747,6 +759,7 @@ static void drain(int id, int code, bool valid, struct burst *rec)
         if (member && (!valid || (code >= 0 && y->kind <= K_MODED))) { y->burst = -1; member = false; }
         bool pass = stage2(y, member ? code : -1);
         if (!valid || !rec) continue;
+        if (member) rec_span(rec, y);
         if (pass && member) {
             int ka = rec_add(rec, y);
             graph_add(rec, y, GP_BEAM, ka);
@@ -779,7 +792,9 @@ static void close_burst(void)
     /* radar filter: only that radar's bursts. Another radar's burst can hold a
      * query that passed it (a UF11 of the filtered radar heard in between, or
      * an all-call paired with one), but the burst is not the filtered radar's */
-    if (valid && rec.n > 0 && (AS.cfg.radar_sel < 0 || code == AS.cfg.radar_sel)) {
+    /* the type and aircraft filters only thin out what a burst shows (rec.n
+     * may be 0); the burst itself, and its radar's statistics, stay */
+    if (valid && rec.nall > 0 && (AS.cfg.radar_sel < 0 || code == AS.cfg.radar_sel)) {
         double margin = o->t1 - o->t0;
         if (margin < 0.03) margin = 0.03;
         if (margin > 0.2) margin = 0.2;
