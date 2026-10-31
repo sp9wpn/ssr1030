@@ -53,7 +53,9 @@ make bds_logger                    # bds_logger only (no libhackrf needed)
 
 ## Filters
 
-These apply to statistics, bursts, the log and `--list`. TCAS stays a separate statistic.
+These apply to statistics, the log, `--list` and what the bursts show. TCAS stays a separate statistic.
+
+Burst detection itself is not filtered: bursts are found from all interrogations, so their timing, dwell and the radar's rotation stay the same under any filter. The type and aircraft filters only thin out each burst's counts, sequence and chart (a burst can show `n=0`); the burst chart picks the newest burst of the main radar that still shows something. Only `-r` leaves out whole bursts of other radars.
 
 - `-r, --radar SI37|II3`: keeps one radar.
   - Mode S interrogations carry the code: UF11 has II/SI, and UF4/5/20/21 have SIS (DI=3) or IIS (DI=0/1/7).
@@ -385,24 +387,28 @@ The interleaving statistics use the same tokens, without the target numbers.
 
 ## bds_logger
 
-A separate program: it reads a Beast stream (dump1090, readsb, …) and prints the Comm-B replies (DF20/21) that hold BDS 5,0 (track and turn) or BDS 6,0 (heading and speed), one line each. It needs no HackRF and no 1030 MHz receiver.
+A separate program: it reads a Beast stream (dump1090, readsb, …) and prints the Comm-B replies (DF20/21) that hold BDS 4,0 (selected altitude), 5,0 (track and turn) or 6,0 (heading and speed), one line each. By default it prints 4,0 and 6,0 (`--bds 40,50,60` adds 5,0). It needs no HackRF and no 1030 MHz receiver.
 
 ```
 ./bds_logger                       # localhost:30005
 ./bds_logger otherhost:30005 --qnh 1018 -v
 ./bds_logger --max-alt 10000          # only aircraft at or below 10000 ft pressure altitude
 ./bds_logger -A 48af10,LOT3TD         # only these aircraft
+./bds_logger --bds 40,50,60           # also BDS 5,0
 ```
 
+Output format (from a test with synthetic replies; `(no ADS-B check)` because that address was given as hex and sent no ADS-B):
+
 ```
-18:57:34.655  471d69  -            35000 ft STD   -6.0 dBFS  BDS5,0  roll  +0.5°  track  11.1°  GS 422 kt  TAS 444 kt  turn +0.03°/s
-18:57:34.664  471d69  -            35000 ft STD   -5.9 dBFS  BDS6,0  hdg   6.5°  IAS 260 kt  M0.768  baro  -192 ft/min  inertial    +0 ft/min
+22:19:29.368  4ca123  -            17200 ft STD  -12.0 dBFS  BDS4,0  MCP 17008 ft  FMS 17008 ft  baro 1013.2 hPa  mode VNAV  target FMS
+22:19:29.769  4ca123  -            17200 ft STD  -12.0 dBFS  BDS6,0  hdg  45.7°  IAS 280 kt  M0.592  baro    +0 ft/min  inertial   +32 ft/min  (no ADS-B check)
 ```
 
 - **Which register:** a Comm-B reply does not say which register it holds (that is in the interrogation, which a 1090 receiver does not hear), so it is inferred from the content, as in pyModeS:
   - every field whose status bit is clear must be all zeros, and values must be in range (roll within ±50°, speeds, Mach, vertical rates);
+  - BDS 4,0 needs no ADS-B to check against: its reserved bits (72–79, 84–85) must be zero, a selected altitude (MCP/FCU or FMS) must be present and within 16 ft of a multiple of 100 ft (it has 16 ft resolution), and a barometric setting must be 950–1060 hPa. It prints the selected altitudes, the barometric setting, the autopilot modes (VNAV, ALT hold, APP) and the target altitude source;
   - the aircraft must have sent ADS-B (DF17) in the last minute, and the reply must agree with its ADS-B velocity from the last 30 s: BDS 5,0 ground speed within 25 kt and track within 12°; BDS 6,0 heading within 40° of the track (wind), vertical rate within 1500 ft/min, IAS and Mach consistent with the altitude, and the true airspeed within 200 kt of the ground speed;
-  - a reply that fits both registers is printed twice, once decoded as each, both marked `?` (`BDS5,0?`, `BDS6,0?`).
+  - a reply that fits more than one register is printed once decoded as each, all marked `?` (`BDS4,0?`, `BDS6,0?`). Registers not selected with `--bds` are still checked, so a 6,0 line that would also fit 5,0 is marked `?` even when 5,0 is not printed.
   - The aircraft address of a DF20/21 reply is its parity (AP) field.
 - **Repeats:** an aircraft interrogated by several radars sends the same content several times; every reply is printed.
 - **Altitude:** the last pressure altitude (DF20 reply, DF0/4, ADS-B), converted to AMSL with the QNH (ISA pressure-height relation).
@@ -413,7 +419,7 @@ A separate program: it reads a Beast stream (dump1090, readsb, …) and prints t
 - **Time:** the receiver's 12 MHz timestamps, placed on the computer's clock, so the times are not bunched by dump1090's network batching.
 - `--max-alt FT`: hides aircraft above this pressure altitude (standard 1013.25, not AMSL), and aircraft with no altitude in the last minute.
 - `-A LIST`: only these aircraft, by hex address or callsign, separated by commas (`-A 48af10,LOT3TD`, case does not matter). A callsign matches once the aircraft's ADS-B identification has been heard. An aircraft given as hex is decoded even if it never sent ADS-B: without an ADS-B velocity to check against, every field of the register must be present (BDS 5,0 roll, track, GS and TAS; BDS 6,0 heading, IAS, Mach and a vertical rate, IAS and Mach consistent with the altitude), and the line ends `(no ADS-B check)`. Such decodes are less certain.
-- `-v`: counts every minute on stderr (Comm-B replies, unknown aircraft, BDS 5,0, BDS 6,0, above `--max-alt`, other aircraft (`-A`), ambiguous (both), neither).
+- `-v`: counts every minute on stderr (Comm-B replies, unknown aircraft, BDS 4,0, BDS 5,0, BDS 6,0, above `--max-alt`, other aircraft (`-A`), ambiguous (both), neither).
 
 ## License
 

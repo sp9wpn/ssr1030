@@ -1,6 +1,7 @@
 /* bds_logger: reads a Beast stream (dump1090, readsb, ...) and prints the
- * Comm-B replies (DF20/21) of ADS-B aircraft that are BDS 5,0 (track and
- * turn) or BDS 6,0 (heading and speed), one line each.
+ * Comm-B replies (DF20/21) of ADS-B aircraft that are BDS 4,0 (selected
+ * altitude), 5,0 (track and turn) or 6,0 (heading and speed), one line each
+ * (--bds chooses which; default 4,0 and 6,0).
  *
  * A Comm-B reply does not say which register it holds; that is in the
  * interrogation, which a 1090 receiver does not hear. So the register is
@@ -10,8 +11,9 @@
  *  - the aircraft must be known from its own ADS-B (DF17) in the last minute,
  *    and the content must agree with its ADS-B velocity: BDS 5,0 ground
  *    speed and track, BDS 6,0 heading (wind correction) and Mach / IAS
- *    against its altitude and ground speed;
- *  - a reply that fits both registers is printed with both decodes, each
+ *    against its altitude and ground speed; BDS 4,0 is checked on its own
+ *    (reserved bits, selected altitude, barometric setting);
+ *  - a reply that fits more than one register is printed with each decode
  *    marked '?'.
  * The address of a DF20/21 reply is its parity syndrome (AP field).
  *
@@ -63,7 +65,8 @@ static int nsel;
 static double qset[QNH_N], qset_t[QNH_N];
 static int qset_n;
 static bool verbose;
-static long n_commb, n_unknown, n_50, n_60, n_both, n_none, n_high, n_other;
+static bool show40 = true, show50 = false, show60 = true;   /* --bds */
+static long n_commb, n_unknown, n_40, n_50, n_60, n_both, n_none, n_high, n_other;
 
 static double now_s(void)
 {
@@ -321,18 +324,36 @@ static bool is60(const uint8_t *m, const struct ac *a, double t, bool ref, struc
     return true;
 }
 
-/* BDS 4,0 barometric setting, for the QNH: reserved bits zero, setting not standard */
-static void bds40(const uint8_t *m, const struct ac *a, double t)
+struct b40 { bool mcp_ok, fms_ok, baro_ok, mode_ok, src_ok; double mcp, fms, baro; bool vnav, alth, app; int src; };
+
+/* BDS 4,0 (selected vertical intention): reserved bits 72-79 and 84-85 zero,
+ * a selected altitude near a multiple of 100 ft (16 ft resolution), a
+ * plausible barometric setting. It needs no ADS-B to check against */
+static bool is40(const uint8_t *m, struct b40 *o)
 {
-    if (!isnan(qnh_cmd) || getbits(m, 72, 79) || getbits(m, 84, 85)) return;
+    if (getbits(m, 72, 79) || getbits(m, 84, 85)) return false;
     if (!field_ok(m, 33, 45) || !field_ok(m, 46, 58) || !field_ok(m, 59, 71) || !field_ok(m, 80, 83) || !field_ok(m, 86, 88))
-        return;
-    if (!getbits(m, 59, 59) || t - a->alt_t > ALT_AGE || a->alt > QNH_MAX_FT) return;
-    double q = getbits(m, 60, 71) * 0.1 + 800;
-    if (q < 950 || q > 1060 || fabs(q - 1013.2) < 0.4) return;
-    if (getbits(m, 33, 33) && (getbits(m, 34, 45) * 16 > 45000)) return;
+        return false;
+    o->mcp_ok = getbits(m, 33, 33);  o->mcp = getbits(m, 34, 45) * 16.0;
+    o->fms_ok = getbits(m, 46, 46);  o->fms = getbits(m, 47, 58) * 16.0;
+    o->baro_ok = getbits(m, 59, 59); o->baro = getbits(m, 60, 71) * 0.1 + 800;
+    o->mode_ok = getbits(m, 80, 80); o->vnav = getbits(m, 81, 81); o->alth = getbits(m, 82, 82); o->app = getbits(m, 83, 83);
+    o->src_ok = getbits(m, 86, 86);  o->src = getbits(m, 87, 88);
+    if (!o->mcp_ok && !o->fms_ok) return false;
+    if (o->mcp_ok && (o->mcp > 50000 || fabs(o->mcp - 100 * round(o->mcp / 100)) > 16)) return false;
+    if (o->fms_ok && (o->fms > 50000 || fabs(o->fms - 100 * round(o->fms / 100)) > 16)) return false;
+    if (o->baro_ok && (o->baro < 950 || o->baro > 1060)) return false;
+    return true;
+}
+
+/* QNH from a BDS 4,0 barometric setting: aircraft low enough to fly on QNH,
+ * setting not standard */
+static void qnh_note(const struct b40 *f, const struct ac *a, double t)
+{
+    if (!isnan(qnh_cmd) || !f->baro_ok || t - a->alt_t > ALT_AGE || a->alt > QNH_MAX_FT) return;
+    if (fabs(f->baro - 1013.2) < 0.4) return;
     double before = qnh_now(t);
-    qset[qset_n % QNH_N] = q;
+    qset[qset_n % QNH_N] = f->baro;
     qset_t[qset_n % QNH_N] = t;
     qset_n++;
     double after = qnh_now(t);
@@ -375,24 +396,39 @@ static void commb(const uint8_t *m, int df, double t, double rssi)
     if ((!a || t - a->seen > KNOWN_AGE) && !given) { n_unknown++; return; }
     if (!a && !(a = ac_get(addr, true))) return;
     if (df == 20) set_alt(a, ac13_ft(getbits(m, 20, 32)), t);
-    bds40(m, a, t);
+    struct b40 f4;
     struct b50 f5;
     struct b60 f6;
-    bool ref = t - a->vel_t <= VEL_AGE;
-    if (!ref && !given) { n_none++; return; }
-    bool r5 = is50(m, a, ref, &f5), r6 = is60(m, a, t, ref, &f6);
-    if (!r5 && !r6) { n_none++; return; }
+    bool r4 = is40(m, &f4);
+    if (r4) qnh_note(&f4, a, t);
+    /* 5,0 and 6,0 need an ADS-B velocity to check against, unless given as hex */
+    bool ref = t - a->vel_t <= VEL_AGE, chk = ref || given;
+    bool r5 = chk && is50(m, a, ref, &f5), r6 = chk && is60(m, a, t, ref, &f6);
+    if (!r4 && !r5 && !r6) { n_none++; return; }
     /* altitude filter: above it, or not known, not shown */
     if (max_alt != INT32_MAX && (t - a->alt_t > ALT_AGE || a->alt > max_alt)) { n_high++; return; }
     if (!selected(a)) { n_other++; return; }
-    /* fits both registers: both decodes, each marked '?' */
-    const char *mark = r5 && r6 ? "?" : " ";
-    if (r5 && r6) n_both++;
+    /* fits more than one register: each decode marked '?' (also when the
+     * other one is not shown) */
+    const char *mark = r4 + r5 + r6 > 1 ? "?" : " ";
+    if (r4 + r5 + r6 > 1) n_both++;
+    else if (r4) n_40++;
     else if (r5) n_50++;
     else n_60++;
     char head[96], body[256];
     print_head(a, t, rssi, head, sizeof(head));
-    if (r5) {
+    if (r4 && show40) {
+        int o = snprintf(body, sizeof(body), "BDS4,0%s", mark);
+        if (f4.mcp_ok) o += snprintf(body + o, sizeof(body) - o, " MCP %5.0f ft", f4.mcp);
+        if (f4.fms_ok) o += snprintf(body + o, sizeof(body) - o, "  FMS %5.0f ft", f4.fms);
+        if (f4.baro_ok) o += snprintf(body + o, sizeof(body) - o, "  baro %6.1f hPa", f4.baro);
+        if (f4.mode_ok) o += snprintf(body + o, sizeof(body) - o, "  mode%s%s%s%s", f4.vnav ? " VNAV" : "", f4.alth ? " ALT" : "",
+                                      f4.app ? " APP" : "", f4.vnav || f4.alth || f4.app ? "" : " -");
+        static const char *srcs[] = { "unknown", "aircraft alt", "MCP/FCU", "FMS" };
+        if (f4.src_ok) snprintf(body + o, sizeof(body) - o, "  target %s", srcs[f4.src]);
+        printf("%s  %s\n", head, body);
+    }
+    if (r5 && show50) {
         int o = snprintf(body, sizeof(body), "BDS5,0%s", mark);
         if (f5.roll_ok) o += snprintf(body + o, sizeof(body) - o, " roll %+5.1f°", f5.roll);
         o += snprintf(body + o, sizeof(body) - o, "  track %5.1f°  GS %3.0f kt", f5.trk, f5.gs);
@@ -400,7 +436,7 @@ static void commb(const uint8_t *m, int df, double t, double rssi)
         if (f5.rate_ok) snprintf(body + o, sizeof(body) - o, "  turn %+.2f°/s", f5.rate);
         printf("%s  %s%s\n", head, body, ref ? "" : "  (no ADS-B check)");
     }
-    if (r6) {
+    if (r6 && show60) {
         int o = snprintf(body, sizeof(body), "BDS6,0%s hdg %5.1f°", mark, f6.hdg);
         if (f6.ias_ok) o += snprintf(body + o, sizeof(body) - o, "  IAS %3.0f kt", f6.ias);
         if (f6.mach_ok) o += snprintf(body + o, sizeof(body) - o, "  M%.3f", f6.mach);
@@ -490,8 +526,8 @@ static void beast(int fd)
         double t = now_s();
         if (verbose && t - last_stat > 60) {
             last_stat = t;
-            fprintf(stderr, "# Comm-B %ld: unknown aircraft %ld, BDS5,0 %ld, BDS6,0 %ld, above --max-alt %ld, other aircraft (-A) %ld, ambiguous %ld, neither %ld\n",
-                    n_commb, n_unknown, n_50, n_60, n_high, n_other, n_both, n_none);
+            fprintf(stderr, "# Comm-B %ld: unknown aircraft %ld, BDS4,0 %ld, BDS5,0 %ld, BDS6,0 %ld, above --max-alt %ld, other aircraft (-A) %ld, ambiguous %ld, neither %ld\n",
+                    n_commb, n_unknown, n_40, n_50, n_60, n_high, n_other, n_both, n_none);
         }
     }
 }
@@ -499,7 +535,7 @@ static void beast(int fd)
 static void usage(void)
 {
     fprintf(stderr,
-            "usage: bds_logger [HOST:PORT] [--qnh HPA] [--max-alt FT] [-A LIST] [-v]\n"
+            "usage: bds_logger [HOST:PORT] [--qnh HPA] [--max-alt FT] [-A LIST] [--bds LIST] [-v]\n"
             "  HOST:PORT   Beast output (default localhost:30005)\n"
             "  --qnh HPA   QNH for AMSL altitudes; default: from BDS 4,0 settings of aircraft below %d ft,\n"
             "              or the pressure altitude (STD) until one is seen\n"
@@ -509,7 +545,9 @@ static void usage(void)
             "              An aircraft given as hex is decoded also without ADS-B: then all fields of the\n"
             "              register must be present, and the line ends '(no ADS-B check)'\n"
             "  -v          statistics every minute on stderr\n"
-            "Prints Comm-B replies of ADS-B aircraft that are BDS 5,0 or 6,0, one per line.\n", QNH_MAX_FT);
+            "  --bds LIST  registers to print, of 40,50,60 (default 40,60); the others are still\n"
+            "              checked, so a reply that also fits one of them is marked '?'\n"
+            "Prints Comm-B replies of ADS-B aircraft that are BDS 4,0, 5,0 or 6,0, one per line.\n", QNH_MAX_FT);
 }
 
 int main(int argc, char **argv)
@@ -531,6 +569,10 @@ int main(int argc, char **argv)
                 if (nsel == SEL_N || strlen(tok) > 8) { fprintf(stderr, "-A: too many entries or '%s' too long\n", tok); return 1; }
                 snprintf(sel[nsel++], sizeof(sel[0]), "%s", tok);
             }
+        } else if (!strcmp(argv[i], "--bds") && i + 1 < argc) {
+            const char *l = argv[++i];
+            show40 = strstr(l, "40") != NULL; show50 = strstr(l, "50") != NULL; show60 = strstr(l, "60") != NULL;
+            if (!show40 && !show50 && !show60) { fprintf(stderr, "--bds: give some of 40,50,60\n"); return 1; }
         } else if (!strcmp(argv[i], "-v")) verbose = true;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { usage(); return 0; }
         else if (argv[i][0] != '-') hp = argv[i];
