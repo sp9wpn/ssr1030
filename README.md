@@ -340,8 +340,8 @@ They are left out of all radar analysis.
 - **Burst table columns** (each interrogation counted once, so they add up to `n`):
   - `AA/CC`, `A/C`, `ACSall`: plain Mode A/C, A/C-only all-calls, A/C/S all-calls.
   - `UF11-all`: UF11 all-calls (token `S` in sequences).
-  - `UF4`, `UF5` (`alt`, `sqk` with `-h`): UF4 and UF5 roll-calls without a Comm-B request.
-  - `b20`, `b40`, `b50`, `b60` (`acid`, `selAlt`, `trk`, `hdgSpd` with `-h`): Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
+  - `UF4`, `UF5` (`alt`, `sqk` with `--human`): UF4 and UF5 roll-calls without a Comm-B request.
+  - `b20`, `b40`, `b50`, `b60` (`acid`, `selAlt`, `trk`, `hdgSpd` with `--human`): Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
   - `oBDS`: any other BDS.
   - `msg`: Comm-A without a request.
   - `other`: UF24, UF19 and the rest.
@@ -354,17 +354,17 @@ They are left out of all radar analysis.
 | `A` `C` | A/C-only all-call (short P4) |
 | `As` `Cs` | A/C/S all-call (long P4) |
 | `S` | UF11 Mode S all-call (acquisition) |
-| `UF4` / `UF5` | UF4 altitude / UF5 Mode A code roll-call, no Comm-B (`alt` / `sqk` with `-h`) |
+| `UF4` / `UF5` | UF4 altitude / UF5 Mode A code roll-call, no Comm-B (`alt` / `sqk` with `--human`) |
 | `UF4b50` `UF5b20` `UF20b60` … | Roll-call requesting a Comm-B register: uplink format, then `b` and the BDS number (default) |
-| `acid` `selAlt` `trk` `hdgSpd` | With `-h`: roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
-| `cap` `gicb` `pos` `met` `ra` `aicb` … | With `-h`: BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
-| `S-msg` | Comm-A UF20/21 without a Comm-B request (with `-h`, `S-msg/hdgSpd` = Comm-A also requesting BDS 6,0) |
+| `acid` `selAlt` `trk` `hdgSpd` | With `--human`: roll-call requesting Comm-B BDS 2,0 aircraft identification (callsign) / 4,0 selected altitude / 5,0 track and turn / 6,0 heading and speed |
+| `cap` `gicb` `pos` `met` `ra` `aicb` … | With `--human`: BDS 1,0 / 1,7 / 5,1-5,2 / 4,4 / 3,0 / air-initiated; `S-bXY` = other BDS X,Y |
+| `S-msg` | Comm-A UF20/21 without a Comm-B request (with `--human`, `S-msg/hdgSpd` = Comm-A also requesting BDS 6,0) |
 | `S-elm` `S-mil` | UF24 ELM, UF19 |
 | `S-sls` | Mode S sidelobe (P5 ≥ P6) whose bits could not be recovered. Normally sidelobe Mode S is fully decoded and shown with its own token and the SLS flag |
 | `S-grb` | Mode S with no sync reversal and no P5 (garbled) |
 
-Roll-calls carry the number of their target, for example `UF4/1` or `UF4b40/2x2` (`alt/1`, `selAlt/2x2` with `-h`).
-With `-h` the burst table columns and the Comm-B BDS table also use the short names; without it they show `b20 b40 b50 b60` and the register number.
+Roll-calls carry the number of their target, for example `UF4/1` or `UF4b40/2x2` (`alt/1`, `selAlt/2x2` with `--human`).
+With `--human` the burst table columns and the Comm-B BDS table also use the short names; without it they show `b20 b40 b50 b60` and the register number.
 Targets are listed under the sequence, numbered in alphabetical order of their callsign or hex: `targets: 1/452124 2/DLH123`.
 
 The interleaving statistics use the same tokens, without the target numbers.
@@ -394,7 +394,7 @@ A separate program: it reads a Beast stream (dump1090, readsb, …) and prints t
 ```
 ./bds_logger                       # localhost:30005
 ./bds_logger otherhost:30005 --qnh 1018 -v
-./bds_logger --max-alt 10000          # only aircraft at or below 10000 ft pressure altitude
+./bds_logger --max-alt 10000          # only aircraft at or below 10000 ft (AMSL when the QNH is known)
 ./bds_logger -A 48af10,LOT3TD         # only these aircraft
 ./bds_logger --bds 40,50,60           # also BDS 5,0
 ```
@@ -421,7 +421,7 @@ Output format (from a test with synthetic replies; `(no ADS-B check)` because th
   - Until a QNH is known, the pressure altitude is shown with `STD`.
 - **Signal:** the received level of each reply in dBFS, from the Beast signal byte (dump1090 writes the square root of the signal power, full scale 1, times 255). It depends on the receiver's gain (with `--enable-agc` it changes over time); `-` when the receiver gives no level.
 - **Time:** the receiver's 12 MHz timestamps, placed on the computer's clock, so the times are not bunched by dump1090's network batching.
-- `--max-alt FT`: hides aircraft above this pressure altitude (standard 1013.25, not AMSL), and aircraft with no altitude in the last minute.
+- `--max-alt FT`: hides aircraft above this altitude, compared with the altitude the line shows: AMSL when a QNH is known (`--qnh`, or derived from BDS 4,0), else the pressure altitude (`STD`). Aircraft with no altitude in the last minute are hidden too.
 - `-A LIST`: only these aircraft, by hex address or callsign, separated by commas (`-A 48af10,LOT3TD`, case does not matter). A callsign matches once the aircraft's ADS-B identification has been heard. An aircraft given as hex is decoded even if it never sent ADS-B: without an ADS-B velocity to check against, every field of the register must be present (BDS 5,0 roll, track, GS and TAS; BDS 6,0 heading, IAS, Mach and a vertical rate, IAS and Mach consistent with the altitude), and the line ends `(no ADS-B check)`. Such decodes are less certain.
 - `-v`: counts every minute on stderr (Comm-B replies, unknown aircraft, data parity (and of those, other registers), BDS 4,0, BDS 5,0, BDS 6,0, above `--max-alt`, other aircraft (`-A`), ambiguous (both), neither).
 

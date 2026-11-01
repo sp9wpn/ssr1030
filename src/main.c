@@ -692,9 +692,9 @@ static void usage(void)
 "      --graph-floor DB   burst graph bar scale starts at this dBFS (default -45; ends at +3)\n"
 "      --busy-gap US      1030 busy: a gap between pulses up to this long counts as one\n"
 "                         interrogation going on (default 21, Mode C P1-P3 is 20.2)\n"
-"  -h, --human            Comm-B requests by short name (trk, selAlt, ...) instead of the uplink\n"
+"      --human            Comm-B requests by short name (trk, selAlt, ...) instead of the uplink\n"
 "                         format and register (UF4b50, UF5b20, UF20b60)\n"
-"      --help             this text\n\n"
+"  -h, --help             this text\n\n"
 "Keys (dashboard): q quit, +/- VGA, L/l LNA, p RF amp (any of these: manual gain), g auto gain,\n"
 "                  r radar filter, a aircraft filter (type it, Enter; empty clears),\n"
 "                  S Mode S only on/off, R roll-calls only on/off, c plain A/C (AA/CC) off/on,\n"
@@ -722,7 +722,7 @@ int main(int argc, char **argv)
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
         { "no-auto-gain", 0, 0, 17 }, { "rx1090", 2, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
         { "beep", 0, 0, 22 }, { "no-1090-sync", 0, 0, 23 }, { "adsb-gain", 1, 0, 24 }, { "graph-floor", 1, 0, 26 }, { "busy-gap", 1, 0, 27 },
-        { "human", 0, 0, 'h' }, { "help", 0, 0, 25 }, { 0, 0, 0, 0 }
+        { "human", 0, 0, 28 }, { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
     };
     int c;
     while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SCcRiIA:Bh", lo, NULL)) != -1) {
@@ -796,8 +796,8 @@ int main(int argc, char **argv)
             break;
         case 19: opt.radar_pos = optarg; break;
         case 20: opt.rx_pos = optarg; break;
-        case 'h': bds_human = true; break;
-        default: usage(); return c == 25 ? 0 : 1;
+        case 28: bds_human = true; break;
+        default: usage(); return c == 'h' ? 0 : 1;
         }
     }
     if (opt.fs < 8e6) { fprintf(stderr, "sample rate must be >= 8e6 for Mode S DPSK\n"); return 1; }
