@@ -63,7 +63,7 @@ struct ac {
 
 static struct ac act[AC_N];
 static double qnh_cmd = NAN;        /* --qnh */
-static int max_alt = INT32_MAX;     /* --max-alt: pressure altitude, ft */
+static int max_alt = INT32_MAX;     /* --max-alt: AMSL with a QNH, else pressure altitude, ft */
 #define SEL_N 32
 static char sel[SEL_N][9];          /* -A: hex addresses or callsigns */
 static int nsel;
@@ -441,7 +441,10 @@ static void commb(const uint8_t *m, int df, double t, double rssi)
     if (r4) qnh_note(&f4, a, t);
     if (!r4 && !r5 && !r6) { n_none++; return; }
     /* altitude filter: above it, or not known, not shown */
-    if (max_alt != INT32_MAX && (t - a->alt_t > ALT_AGE || a->alt > max_alt)) { n_high++; return; }
+    if (max_alt != INT32_MAX) {
+        double q = qnh_now(t), shown = isnan(q) ? a->alt : amsl_ft(a->alt, q);   /* the altitude the line shows */
+        if (t - a->alt_t > ALT_AGE || shown > max_alt) { n_high++; return; }
+    }
     if (!selected(a)) { n_other++; return; }
     /* fits more than one register: each decode marked '?' (also when the
      * other one is not shown) */
@@ -575,7 +578,8 @@ static void usage(void)
             "  HOST:PORT   Beast output (default localhost:30005)\n"
             "  --qnh HPA   QNH for AMSL altitudes; default: from BDS 4,0 settings of aircraft below %d ft,\n"
             "              or the pressure altitude (STD) until one is seen\n"
-            "  --max-alt FT  hide aircraft above this pressure altitude (or with no altitude known)\n"
+            "  --max-alt FT  hide aircraft above this altitude: AMSL when a QNH is known (--qnh or\n"
+            "              derived), else pressure altitude; also those with no altitude known\n"
             "  -A LIST     only these aircraft: hex addresses or callsigns, separated by commas\n"
             "              (e.g. -A 48af10,LOT3TD; a callsign matches once its ADS-B identification is heard).\n"
             "              An aircraft given as hex is decoded also without ADS-B: then all fields of the\n"
