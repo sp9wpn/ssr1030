@@ -411,6 +411,8 @@ Output format (from a test with synthetic replies; `(no ADS-B check)` because th
   - the aircraft must have sent ADS-B (DF17) in the last minute, and the reply must agree with its ADS-B velocity from the last 30 s: BDS 5,0 ground speed within 25 kt and track within 12°; BDS 6,0 heading within 40° of the track (wind), vertical rate within 1500 ft/min, IAS and Mach consistent with the altitude, and the true airspeed within 200 kt of the ground speed;
   - a reply that fits more than one register is printed once decoded as each, all marked `?` (`BDS4,0?`, `BDS6,0?`). Registers not selected with `--bds` are still checked, so a 6,0 line that would also fit 5,0 is marked `?` even when 5,0 is not printed.
   - The aircraft address of a DF20/21 reply is its parity (AP) field.
+- **Data parity (DP):** some radars (e.g. the one at EPKT) ask for BDS 4,0/5,0/6,0 with data parity. The reply's parity field is then the address XOR (register << 16), e.g. `address ^ 0x600000` for BDS 6,0. If the parity field is not a known aircraft, bds_logger tries this for the usual registers (1,0, 1,7–2,1, 3,0, 4,0–4,8, 5,0–5,3, 5,F, 6,0). A match names the register, so the reply is decoded as that register only and marked `D` (`BDS6,0D`). It gets the range checks above but not the ADS-B comparison, so it also works on the runway, where aircraft send no airborne ADS-B velocity. DP replies of registers other than 4,0/5,0/6,0 are counted but not printed.
+  - Stock dump1090 drops DP replies before its Beast output, so they arrive only from a decoder that accepts them, such as dump1090-fa with `modes-rx/dump1090-fa-dataparity.patch`.
 - **Repeats:** an aircraft interrogated by several radars sends the same content several times; every reply is printed.
 - **Altitude:** the last pressure altitude (DF20 reply, DF0/4, ADS-B), converted to AMSL with the QNH (ISA pressure-height relation).
   - `--qnh HPA` sets the QNH.
@@ -420,7 +422,7 @@ Output format (from a test with synthetic replies; `(no ADS-B check)` because th
 - **Time:** the receiver's 12 MHz timestamps, placed on the computer's clock, so the times are not bunched by dump1090's network batching.
 - `--max-alt FT`: hides aircraft above this pressure altitude (standard 1013.25, not AMSL), and aircraft with no altitude in the last minute.
 - `-A LIST`: only these aircraft, by hex address or callsign, separated by commas (`-A 48af10,LOT3TD`, case does not matter). A callsign matches once the aircraft's ADS-B identification has been heard. An aircraft given as hex is decoded even if it never sent ADS-B: without an ADS-B velocity to check against, every field of the register must be present (BDS 5,0 roll, track, GS and TAS; BDS 6,0 heading, IAS, Mach and a vertical rate, IAS and Mach consistent with the altitude), and the line ends `(no ADS-B check)`. Such decodes are less certain.
-- `-v`: counts every minute on stderr (Comm-B replies, unknown aircraft, BDS 4,0, BDS 5,0, BDS 6,0, above `--max-alt`, other aircraft (`-A`), ambiguous (both), neither).
+- `-v`: counts every minute on stderr (Comm-B replies, unknown aircraft, data parity (and of those, other registers), BDS 4,0, BDS 5,0, BDS 6,0, above `--max-alt`, other aircraft (`-A`), ambiguous (both), neither).
 
 ## License
 

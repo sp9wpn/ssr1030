@@ -15,7 +15,12 @@
  *    (reserved bits, selected altitude, barometric setting);
  *  - a reply that fits more than one register is printed with each decode
  *    marked '?'.
- * The address of a DF20/21 reply is its parity syndrome (AP field).
+ * The address of a DF20/21 reply is its parity syndrome (AP field), or, when
+ * the interrogator asked for data parity (DP), the syndrome XOR (BDS1,BDS2
+ * << 16). A DP reply thus names its own register: it is decoded as that
+ * register only, with the range checks but without the ADS-B comparison
+ * (which fails on the runway, where there is no airborne ADS-B velocity),
+ * and marked 'D'.
  *
  * Altitude: the last pressure altitude (DF20 reply, DF0/4/16, ADS-B), made
  * AMSL with --qnh, or else with a QNH read from BDS 4,0 replies (barometric
@@ -66,7 +71,14 @@ static double qset[QNH_N], qset_t[QNH_N];
 static int qset_n;
 static bool verbose;
 static bool show40 = true, show50 = false, show60 = true;   /* --bds */
-static long n_commb, n_unknown, n_40, n_50, n_60, n_both, n_none, n_high, n_other;
+static long n_commb, n_unknown, n_40, n_50, n_60, n_both, n_none, n_high, n_other, n_dp, n_dp_other;
+
+/* registers that may be requested with data parity (the syndrome is then
+ * address ^ (BDS << 16)) */
+static const uint8_t dp_registers[] = {
+    0x10, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x30,
+    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x48, 0x50, 0x51, 0x52, 0x53, 0x5f, 0x60
+};
 
 static double now_s(void)
 {
@@ -262,7 +274,7 @@ static bool hex_given(uint32_t addr)
 
 /* ref: an ADS-B velocity to check against. Without one (an aircraft given as
  * hex with -A and no recent ADS-B), every field must be present instead */
-static bool is50(const uint8_t *m, const struct ac *a, bool ref, struct b50 *o)
+static bool is50(const uint8_t *m, const struct ac *a, bool ref, bool dp, struct b50 *o)
 {
     if (!field_ok(m, 33, 43) || !field_ok(m, 44, 55) || !field_ok(m, 56, 66) || !field_ok(m, 67, 77) || !field_ok(m, 78, 88))
         return false;
@@ -276,6 +288,7 @@ static bool is50(const uint8_t *m, const struct ac *a, bool ref, struct b50 *o)
     if (o->gs < 40 || o->gs > 700) return false;
     if (o->tas_ok && (o->tas < 40 || o->tas > 600 || fabs(o->gs - o->tas) > 200)) return false;
     if (o->rate_ok && fabs(o->rate) > 8) return false;
+    if (dp) return true;                                        /* register named by the reply itself */
     if (!ref) return o->roll_ok && o->tas_ok;
     return fabs(o->gs - a->gs) <= 25 && angdiff(o->trk, a->trk) <= 12;
 }
@@ -296,7 +309,7 @@ static double sound_kt(double alt_ft)
     return 38.967854 * sqrt(tk);
 }
 
-static bool is60(const uint8_t *m, const struct ac *a, double t, bool ref, struct b60 *o)
+static bool is60(const uint8_t *m, const struct ac *a, double t, bool ref, bool dp, struct b60 *o)
 {
     if (!field_ok(m, 33, 44) || !field_ok(m, 45, 55) || !field_ok(m, 56, 66) || !field_ok(m, 67, 77) || !field_ok(m, 78, 88))
         return false;
@@ -312,6 +325,8 @@ static bool is60(const uint8_t *m, const struct ac *a, double t, bool ref, struc
     if (o->ins_ok && fabs(o->ins) > 6000) return false;
     if (o->baro_ok && o->ins_ok && fabs(o->baro - o->ins) > 2000) return false;
     bool alt = t - a->alt_t <= ALT_AGE;
+    if (dp)                                                     /* register named by the reply itself */
+        return !(o->ias_ok && o->mach_ok && alt && fabs(cas_to_mach(o->ias, a->alt) - o->mach) > 0.04);
     if (!ref)
         return o->ias_ok && o->mach_ok && (o->baro_ok || o->ins_ok) &&
                (!alt || fabs(cas_to_mach(o->ias, a->alt) - o->mach) <= 0.04);
@@ -390,27 +405,48 @@ static bool selected(const struct ac *a)
 static void commb(const uint8_t *m, int df, double t, double rssi)
 {
     n_commb++;
-    uint32_t addr = crc(m, 112);
+    uint32_t syn = crc(m, 112), addr = syn;
     struct ac *a = ac_get(addr, false);
     bool given = hex_given(addr);
-    if ((!a || t - a->seen > KNOWN_AGE) && !given) { n_unknown++; return; }
+    unsigned dp = 0;                                            /* register named by data parity */
+    if ((!a || t - a->seen > KNOWN_AGE) && !given) {
+        /* data parity: syndrome = address ^ (BDS << 16) */
+        for (unsigned k = 0; k < sizeof(dp_registers) && !dp; k++) {
+            uint32_t x = syn ^ ((uint32_t)dp_registers[k] << 16);
+            struct ac *b = ac_get(x, false);
+            if ((b && t - b->seen <= KNOWN_AGE) || hex_given(x)) { dp = dp_registers[k]; addr = x; a = b; given = hex_given(x); }
+        }
+        if (!dp) { n_unknown++; return; }
+        n_dp++;
+    }
     if (!a && !(a = ac_get(addr, true))) return;
     if (df == 20) set_alt(a, ac13_ft(getbits(m, 20, 32)), t);
+    if (dp && dp != 0x40 && dp != 0x50 && dp != 0x60) { n_dp_other++; return; }
     struct b40 f4;
     struct b50 f5;
     struct b60 f6;
-    bool r4 = is40(m, &f4);
+    bool r4, r5, r6, ref = t - a->vel_t <= VEL_AGE;
+    if (dp) {
+        /* only the named register, no ADS-B comparison */
+        r4 = dp == 0x40 && is40(m, &f4);
+        r5 = dp == 0x50 && is50(m, a, ref, true, &f5);
+        r6 = dp == 0x60 && is60(m, a, t, ref, true, &f6);
+    } else {
+        r4 = is40(m, &f4);
+        /* 5,0 and 6,0 need an ADS-B velocity to check against, unless given as hex */
+        bool chk = ref || given;
+        r5 = chk && is50(m, a, ref, false, &f5);
+        r6 = chk && is60(m, a, t, ref, false, &f6);
+    }
     if (r4) qnh_note(&f4, a, t);
-    /* 5,0 and 6,0 need an ADS-B velocity to check against, unless given as hex */
-    bool ref = t - a->vel_t <= VEL_AGE, chk = ref || given;
-    bool r5 = chk && is50(m, a, ref, &f5), r6 = chk && is60(m, a, t, ref, &f6);
     if (!r4 && !r5 && !r6) { n_none++; return; }
     /* altitude filter: above it, or not known, not shown */
     if (max_alt != INT32_MAX && (t - a->alt_t > ALT_AGE || a->alt > max_alt)) { n_high++; return; }
     if (!selected(a)) { n_other++; return; }
     /* fits more than one register: each decode marked '?' (also when the
      * other one is not shown) */
-    const char *mark = r4 + r5 + r6 > 1 ? "?" : " ";
+    const char *mark = dp ? "D" : r4 + r5 + r6 > 1 ? "?" : " ";
+    const char *nochk = ref || dp ? "" : "  (no ADS-B check)";
     if (r4 + r5 + r6 > 1) n_both++;
     else if (r4) n_40++;
     else if (r5) n_50++;
@@ -434,7 +470,7 @@ static void commb(const uint8_t *m, int df, double t, double rssi)
         o += snprintf(body + o, sizeof(body) - o, "  track %5.1f°  GS %3.0f kt", f5.trk, f5.gs);
         if (f5.tas_ok) o += snprintf(body + o, sizeof(body) - o, "  TAS %3.0f kt", f5.tas);
         if (f5.rate_ok) snprintf(body + o, sizeof(body) - o, "  turn %+.2f°/s", f5.rate);
-        printf("%s  %s%s\n", head, body, ref ? "" : "  (no ADS-B check)");
+        printf("%s  %s%s\n", head, body, nochk);
     }
     if (r6 && show60) {
         int o = snprintf(body, sizeof(body), "BDS6,0%s hdg %5.1f°", mark, f6.hdg);
@@ -442,7 +478,7 @@ static void commb(const uint8_t *m, int df, double t, double rssi)
         if (f6.mach_ok) o += snprintf(body + o, sizeof(body) - o, "  M%.3f", f6.mach);
         if (f6.baro_ok) o += snprintf(body + o, sizeof(body) - o, "  baro %+5.0f ft/min", f6.baro);
         if (f6.ins_ok) snprintf(body + o, sizeof(body) - o, "  inertial %+5.0f ft/min", f6.ins);
-        printf("%s  %s%s\n", head, body, ref ? "" : "  (no ADS-B check)");
+        printf("%s  %s%s\n", head, body, nochk);
     }
     fflush(stdout);
 }
@@ -526,8 +562,8 @@ static void beast(int fd)
         double t = now_s();
         if (verbose && t - last_stat > 60) {
             last_stat = t;
-            fprintf(stderr, "# Comm-B %ld: unknown aircraft %ld, BDS4,0 %ld, BDS5,0 %ld, BDS6,0 %ld, above --max-alt %ld, other aircraft (-A) %ld, ambiguous %ld, neither %ld\n",
-                    n_commb, n_unknown, n_40, n_50, n_60, n_high, n_other, n_both, n_none);
+            fprintf(stderr, "# Comm-B %ld: unknown aircraft %ld, data parity %ld (other registers %ld), BDS4,0 %ld, BDS5,0 %ld, BDS6,0 %ld, above --max-alt %ld, other aircraft (-A) %ld, ambiguous %ld, neither %ld\n",
+                    n_commb, n_unknown, n_dp, n_dp_other, n_40, n_50, n_60, n_high, n_other, n_both, n_none);
         }
     }
 }
@@ -547,7 +583,8 @@ static void usage(void)
             "  -v          statistics every minute on stderr\n"
             "  --bds LIST  registers to print, of 40,50,60 (default 40,60); the others are still\n"
             "              checked, so a reply that also fits one of them is marked '?'\n"
-            "Prints Comm-B replies of ADS-B aircraft that are BDS 4,0, 5,0 or 6,0, one per line.\n", QNH_MAX_FT);
+            "Prints Comm-B replies of ADS-B aircraft that are BDS 4,0, 5,0 or 6,0, one per line.\n"
+            "Replies with data parity (address XOR register) name their register: marked 'D'.\n", QNH_MAX_FT);
 }
 
 int main(int argc, char **argv)
