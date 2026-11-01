@@ -357,8 +357,34 @@ static double sgn(const uint8_t *m, int sbit, int first, int last)
 
 static const char ais[] = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ##### ###############0123456789######";
 
+/* BDS 5,1 position report coarse: status, latitude and longitude (sign +
+ * 19 bits, LSB 360/2^20 deg), pressure altitude (sign + 14 bits, LSB 8 ft) */
+#define B51_LSB (360.0 / 1048576)
+bool bds51_pos(const uint8_t *m, double *lat, double *lon)
+{
+    if (!getbits(m, 33, 33)) return false;
+    *lat = sgn(m, 34, 35, 53) * B51_LSB;
+    *lon = sgn(m, 54, 55, 73) * B51_LSB;
+    return fabs(*lat) <= 90;
+}
+
+/* BDS 5,2 position report fine: status, FOM/source (4 bits), latitude and
+ * longitude fine (18-bit two's complement, LSB 90/2^24 deg: the position
+ * modulo 180/128 deg, resolved with a known one), altitude as in 5,1 */
+#define B52_LSB  (90.0 / 16777216)
+#define B52_SPAN (180.0 / 128)
+static const char *fom_str(int f)
+{
+    static const char *s[] = { "no nav", "RNP 20", "RNP 5", "RNP 1", "DGNSS 10 m", "DGNSS 2.5 m" };
+    if (f <= 5) return s[f];
+    if (f >= 11 && f <= 13) return s[f - 8];   /* as 3-5, with GNSS height in the altitude field */
+    return "FOM unassigned";
+}
+
+#include "commb_fmt.h"
+
 /* Comm-B content of the register the query asked for (MB = bits 33-88) */
-static void commb(const uint8_t *m, int bds, char *buf, size_t n)
+static void commb(const uint8_t *m, int bds, double ref_lat, double ref_lon, char *buf, size_t n)
 {
     int o = snprintf(buf, n, "  BDS %X,%X:", bds >> 4, bds & 15);
     switch (bds) {
@@ -370,6 +396,16 @@ static void commb(const uint8_t *m, int bds, char *buf, size_t n)
         snprintf(buf + o, n - o, getbits(m, 33, 40) == 0x20 ? " id %s" : " (not BDS 2,0)", cs);
         return;
     }
+    case 0x10:
+        if (getbits(m, 33, 40) != 0x10) { snprintf(buf + o, n - o, " (not BDS 1,0)"); return; }
+        fmt10(m, buf + o, n - o);
+        return;
+    case 0x30:
+        if (getbits(m, 33, 40) != 0x30) { snprintf(buf + o, n - o, " (not BDS 3,0)"); return; }
+        fmt30(m, buf + o, n - o);
+        return;
+    case 0x44: fmt44(m, buf + o, n - o); return;
+    case 0x45: fmt45(m, buf + o, n - o); return;
     case 0x40:
         if (getbits(m, 33, 33)) o += snprintf(buf + o, n - o, " MCP alt %u ft", getbits(m, 34, 45) * 16);
         if (getbits(m, 46, 46)) o += snprintf(buf + o, n - o, " FMS alt %u ft", getbits(m, 47, 58) * 16);
@@ -382,6 +418,25 @@ static void commb(const uint8_t *m, int bds, char *buf, size_t n)
         if (getbits(m, 67, 67)) o += snprintf(buf + o, n - o, " turn %+.2f°/s", sgn(m, 68, 69, 77) * 8.0 / 256);
         if (getbits(m, 78, 78)) snprintf(buf + o, n - o, " TAS %u kt", getbits(m, 79, 88) * 2);
         return;
+    case 0x51: {
+        double la, lo;
+        if (!bds51_pos(m, &la, &lo)) { snprintf(buf + o, n - o, getbits(m, 33, 33) ? " (latitude out of range)" : " (not valid)"); return; }
+        snprintf(buf + o, n - o, " %.4f %.4f  alt %.0f ft", la, lo, sgn(m, 74, 75, 88) * 8);
+        return;
+    }
+    case 0x52: {
+        if (!getbits(m, 33, 33)) { snprintf(buf + o, n - o, " (not valid)"); return; }
+        int fom = (int)getbits(m, 34, 37);
+        double fla = sgn(m, 38, 39, 55) * B52_LSB, flo = sgn(m, 56, 57, 73) * B52_LSB;
+        if (!isnan(ref_lat)) {
+            double la = ref_lat + remainder(fla - ref_lat, B52_SPAN), lo = ref_lon + remainder(flo - ref_lon, B52_SPAN);
+            lo = remainder(lo, 360);
+            o += snprintf(buf + o, n - o, " %.6f %.6f", la, lo);
+        } else
+            o += snprintf(buf + o, n - o, " fine %+.6f %+.6f (mod %.4f°, no position known)", fla, flo, B52_SPAN);
+        snprintf(buf + o, n - o, "  %s %.0f ft  %s", fom >= 11 && fom <= 13 ? "GNSS ht" : "alt", sgn(m, 74, 75, 88) * 8, fom_str(fom));
+        return;
+    }
     case 0x60:
         if (getbits(m, 33, 33)) o += snprintf(buf + o, n - o, " hdg %.1f°", fmod(sgn(m, 34, 35, 44) * 90.0 / 512 + 360, 360));
         if (getbits(m, 45, 45)) o += snprintf(buf + o, n - o, " IAS %u kt", getbits(m, 46, 55));
@@ -406,7 +461,7 @@ void reply_describe(const struct rx1090_rec *r, char *buf, size_t n)
     default: o = snprintf(buf, n, "DF%d", r->df);
     }
     if ((r->df == 20 || r->df == 21) && r->len == 14 && o < (int)n) {
-        if (r->req_bds >= 0) commb(m, r->req_bds, buf + o, n - o);
+        if (r->req_bds >= 0) commb(m, r->req_bds, r->ref_lat, r->ref_lon, buf + o, n - o);
         else snprintf(buf + o, n - o, "  Comm-B (no register requested)");
     }
 }

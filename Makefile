@@ -12,10 +12,10 @@ all: ssr1030 bds_logger
 ssr1030: $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDLIBS)
 
-src/%.o: src/%.c src/ssr1030.h src/analysis.h
+src/%.o: src/%.c src/ssr1030.h src/analysis.h src/commb_fmt.h
 	$(CC) $(CFLAGS) $(HACKRF_CFLAGS) -c -o $@ $<
 
-bds_logger: src/bds_logger.c
+bds_logger: src/bds_logger.c src/commb_fmt.h
 	$(CC) $(CFLAGS) -o $@ $< -lm
 
 clean:

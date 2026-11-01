@@ -106,6 +106,7 @@
 #define SYNC_BAD    15e-6           /* this far off: back to SYNC_IV_MIN */
 #define SYNC_STALE  (SYNC_IV_MAX + 120) /* s without a window: back to locking from replies */
 #define POS_AGE     10.0            /* s: a position is used this long (250 m/s -> ~8 us) */
+#define REF_AGE     300.0           /* s: a position resolves BDS 5,2 (+-0.7 deg) this long */
 #define TURNAROUND  128e-6          /* Mode S reply delay after the sync phase reversal */
 #define C_LIGHT     299792458.0
 #define RES_N       64
@@ -120,6 +121,7 @@ struct acd {
     bool pos;                       /* ADS-B position: ECEF, receiver time of the fix */
     double ecef[3], pos_r;
     double h, h_t;                  /* height above the radar (reply or ADS-B altitude), when */
+    double lat, lon, ll_t;          /* last position (ADS-B or a BDS 5,1 reply), receiver time; ll_t 0: none */
     bool used;
 };
 struct minage { double cur, prev, t; };     /* minimum over the last 30-60 s */
@@ -810,6 +812,7 @@ void rx1090_poll(double t_now)
             if (a && geo_dist(e, g_rx) < 400e3) {
                 if (!a->pos) S.npos++;
                 memcpy(a->ecef, e, sizeof(e)); a->pos = true; a->pos_r = r;
+                a->lat = la; a->lon = lo; a->ll_t = r;
                 a->h = alt - g_ralt; a->h_t = r;
             }
         }
@@ -907,6 +910,14 @@ static void keep(struct interrog *x, const struct reply *y, double d, float res_
         if (a) { a->h = k->h_m; a->h_t = y->r; }
     } else if (a && a->h_t > 0 && fabs(y->r - a->h_t) < AC_AGE) k->h_m = (float)a->h;
     if (a && geo_on && a->pos && fabs(y->r - a->pos_r) <= POS_AGE) k->adsb_m = (float)geo_dist(g_radar, a->ecef);
+    k->ref_lat = k->ref_lon = NAN;
+    if (a && a->ll_t > 0 && fabs(y->r - a->ll_t) <= REF_AGE) { k->ref_lat = a->lat; k->ref_lon = a->lon; }
+    double la, lo;
+    if (req == 0x51 && (y->df == 20 || y->df == 21) && y->len == 14 && bds51_pos(y->msg, &la, &lo) &&
+        (a || (a = ac_get(x->addr, true)))) {
+        /* the reply's own coarse position, unless a fresh ADS-B one is better */
+        if (!(a->pos && fabs(y->r - a->pos_r) <= POS_AGE)) { a->lat = la; a->lon = lo; a->ll_t = y->r; }
+    }
     if (x->rep_n < 255) x->rep_n++;
 }
 

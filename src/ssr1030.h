@@ -197,7 +197,10 @@ struct rx1090_rec {         /* a reply matched to a query, kept for display */
     float excess_m;         /* radar->aircraft->antenna minus radar->antenna, NAN without a position lock */
     float h_m;              /* aircraft height above the radar (reply or recent altitude), NAN unknown */
     float adsb_m;           /* radar->aircraft from a recent ADS-B position, NAN none */
+    double ref_lat, ref_lon;/* aircraft position known at the reply (ADS-B, else its last BDS 5,1), NAN none:
+                               resolves the BDS 5,2 fine position */
 };
+bool bds51_pos(const uint8_t *msg, double *lat, double *lon);   /* modes.c: valid BDS 5,1 coarse position */
 const struct rx1090_rec *rx1090_rec_get(uint64_t idx);   /* NULL once overwritten */
 void reply_describe(const struct rx1090_rec *r, char *buf, size_t n);   /* modes.c: decoded content */
 int reply_alt_ft(const uint8_t *msg, int df);            /* modes.c: DF4/20 altitude, INT32_MIN none */
