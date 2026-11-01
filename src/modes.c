@@ -136,6 +136,16 @@ static int hexmsg(const struct interrog *it, char *b, size_t n)
     return o;
 }
 
+/* reply parity a roll-call asks for (Annex 10 Vol IV 3.1.2.6.1.4.1 i): with
+ * DI 0, 3 or 7, bit 28 is OVC (overlay control); 1 asks for data parity (DP:
+ * the BDS code XORed into the top 8 address bits before the parity), 0 for
+ * plain address/parity (AP). Other DI codes carry no OVC: AP */
+const char *modes_parity_req(const uint8_t *m)
+{
+    int di = getbits(m, 14, 16);
+    return (di == 0 || di == 3 || di == 7) && getbits(m, 28, 28) ? "DP" : "AP";
+}
+
 void modes_describe(const struct interrog *it, char *buf, size_t len)
 {
     const uint8_t *m = it->msg;
@@ -157,7 +167,7 @@ void modes_describe(const struct interrog *it, char *buf, size_t len)
         }
         if ((di == 1 || di == 7) && getbits(m, 26, 26)) o += snprintf(buf + o, len - o, " LOS");
         int b1, b2;
-        if (modes_bds(m, &b1, &b2)) o += snprintf(buf + o, len - o, " BDS%X,%X", b1, b2);
+        if (modes_bds(m, &b1, &b2)) o += snprintf(buf + o, len - o, " BDS%X,%X %s", b1, b2, modes_parity_req(m));
         if (pc) o += snprintf(buf + o, len - o, " %s", pc_txt[pc]);
         break;
     }

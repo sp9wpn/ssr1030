@@ -13,7 +13,7 @@ int output_open(const char *path, char sep)
     osep = sep;
     const char *cols[] = { "t_s", "utc", "kind", "uf", "amp_dbfs", "p1_dbfs", "p6_dbfs", "gain_db", "rx_db", "p2_rel_db", "p5_rel_db", "p4_us",
                            "s1", "sidelobe", "tcas", "burst", "radar", "addr", "callsign", "ii_si", "pr", "rr",
-                           "di", "bds", "sync", "quality", "hex", "answered", "reply_df", "reply_us", "replies", "residual_us" };
+                           "di", "bds", "parity", "sync", "quality", "hex", "answered", "reply_df", "reply_us", "replies", "residual_us" };
     for (size_t k = 0; k < sizeof(cols) / sizeof(cols[0]); k++)
         fprintf(out, "%s%s", k ? (char[]){ osep, 0 } : "", cols[k]);
     fputc('\n', out);
@@ -31,7 +31,7 @@ void output_write(const struct interrog *it, double start_epoch)
     char ts[40];
     strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", &tm);
 
-    char iisi[8] = "-", pr[4] = "-", rr[4] = "-", di[4] = "-", bds[8] = "-", addr[8] = "-", hex[32] = "-";
+    char iisi[8] = "-", pr[4] = "-", rr[4] = "-", di[4] = "-", bds[8] = "-", par[4] = "-", addr[8] = "-", hex[32] = "-";
     char radar[8], cs[12] = "-";
     radar_code_str(it->radar, radar, sizeof(radar));
     if (radar[0] == '?') snprintf(radar, sizeof(radar), "-");
@@ -50,7 +50,10 @@ void output_write(const struct interrog *it, double start_epoch)
             snprintf(rr, sizeof(rr), "%u", getbits(it->msg, 9, 13));
             snprintf(di, sizeof(di), "%u", getbits(it->msg, 14, 16));
             int b1, b2;
-            if (modes_bds(it->msg, &b1, &b2)) snprintf(bds, sizeof(bds), "%X%X", b1, b2);
+            if (modes_bds(it->msg, &b1, &b2)) {
+                snprintf(bds, sizeof(bds), "%X%X", b1, b2);
+                snprintf(par, sizeof(par), "%s", modes_parity_req(it->msg));
+            }
         }
     }
     fprintf(out, "%.7f%c%s.%06dZ%c%s%c%d%c%.1f%c%.1f%c", it->t, s, ts, (int)((ut - sec) * 1e6), s,
@@ -59,9 +62,9 @@ void output_write(const struct interrog *it, double start_epoch)
     fprintf(out, "%.0f%c%.1f%c", it->gain_db, s, it->amp_db - it->gain_db, s);
     if (isnan(it->p2_db)) fprintf(out, "-%c", s); else fprintf(out, "%.1f%c", it->p2_db, s);
     if (isnan(it->p5_db)) fprintf(out, "-%c", s); else fprintf(out, "%.1f%c", it->p5_db, s);
-    fprintf(out, "%.2f%c%d%c%d%c%d%c%d%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%.2f%c%.2f%c%s",
+    fprintf(out, "%.2f%c%d%c%d%c%d%c%d%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%s%c%.2f%c%.2f%c%s",
             it->p4_width, s, it->s1, s, it->sidelobe, s, it->tcas, s, it->burst, s, radar, s, addr, s,
-            cs, s, iisi, s, pr, s, rr, s, di, s, bds, s, it->sync, s, it->quality, s, hex);
+            cs, s, iisi, s, pr, s, rr, s, di, s, bds, s, par, s, it->sync, s, it->quality, s, hex);
     /* 1090 reply: "-" when it could not be checked (no --rx1090, no lock, not matchable) */
     if (!it->checked) fprintf(out, "%c-%c-%c-%c-%c-\n", s, s, s, s, s);
     else if (!it->answered) fprintf(out, "%c0%c-%c-%c0%c-\n", s, s, s, s, s);

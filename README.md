@@ -370,7 +370,7 @@ The interleaving statistics use the same tokens, without the target numbers.
 
 ## Log columns
 
-`t_s utc kind uf amp_dbfs p1_dbfs p6_dbfs gain_db rx_db p2_rel_db p5_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds sync quality hex answered reply_df reply_us replies`
+`t_s utc kind uf amp_dbfs p1_dbfs p6_dbfs gain_db rx_db p2_rel_db p5_rel_db p4_us s1 sidelobe tcas burst radar addr callsign ii_si pr rr di bds parity sync quality hex answered reply_df reply_us replies`
 
 - `amp_dbfs` is the query amplitude: P6 for Mode S, P1 for A/C.
   - P6 is the 70th percentile of the plateau, excluding the P5 window. It is 16–30 µs long, so much less noisy than the 0.8 µs P1.
@@ -378,6 +378,7 @@ The interleaving statistics use the same tokens, without the target numbers.
 - `p2_rel_db` is P2 − P1. `p5_rel_db` is P5 − P6, so ≥ 0 means sidelobe (the transponder rule).
 - `burst` is -1 outside a main-beam burst.
 - `radar` is the attributed radar code, or `-` when unknown.
+- `parity` is the reply parity a Comm-B request asks for: `DP` (data parity) when the OVC bit (bit 28, with DI 0, 3 or 7) is set, else `AP` (address/parity); `-` when no register is requested. With DP the transponder XORs the BDS code into the top 8 address bits before computing the parity, so a reply with the wrong register fails the check ("BDS swap"); only transponders certified from 2020 must support it (BDS 1,0 bit 15 reports it). The `-L` list shows it after the register: `BDS5,0 DP`.
 - `quality` is the weakest DPSK bit confidence (0–1).
 - `hex` is the raw Mode S message.
 - `answered reply_df reply_us replies` come from `--rx1090`:
