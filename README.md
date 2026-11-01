@@ -115,6 +115,7 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - in the burst chart, after the target.
 - **Matching:**
   - roll-calls (UF4/5/20/21) by aircraft address, with a DF4/20 reply to UF4/20 and a DF5/21 reply to UF5/21;
+  - data parity: when a Comm-B request sets OVC (`DP` in the log), the transponder overlays the requested register on the address before the parity, so the DF20/21 reply's syndrome is the address XOR (BDS1,BDS2 << 16). It is matched by that syndrome, for whatever register the query asked for, and shown as `↳ DF20 DP` in the burst chart. Stock dump1090 drops such replies (the syndrome is not a known aircraft); a dump1090 patched to pass them on is needed;
   - UF11 by the II/SI code in the DF11 reply. II/SI codes are reused by distant radars (seen on air: SI37 DF11 replies to a radar with a ~5.0 s rotation), so with the geometry lock a DF11 reply must also arrive within 40 µs of its predicted time.
   - Delay: with an ADS-B position, only a reply at the predicted delay counts. Without one, the first matched reply sets the aircraft's delay, and for the next 60 s only replies near it count. Other radars interrogate the same aircraft, and their replies land at other delays (seen: one aircraft at 564, 798 and 1604 µs within 9 ms). Under the 1090-window clock "near" is 10 µs plus 2 µs per second since that reply (the aircraft moves), up to 250 µs; otherwise it is 250 µs.
   - Mode A/C replies carry no address or radar code, so A/C queries are never marked.

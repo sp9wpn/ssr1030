@@ -313,7 +313,7 @@ static void draw_graph(int cols, int rows)
                 if (nr) o += snprintf(rng + o, sizeof(rng) - o, " NM");
                 if (!isnan(r->adsb_m)) snprintf(rng + o, sizeof(rng) - o, "%s(ADS-B %.1f NM)", nr ? " " : "  ", r->adsb_m / 1852);
                 reply_describe(r, c, sizeof(c));
-                snprintf(line, sizeof(line), "%22s" CYN "\u21b3 DF%-2d %6.1f \u00b5s%s%s  %s" R, "", r->df, r->delay_us, res, rng, c);
+                snprintf(line, sizeof(line), "%22s" CYN "\u21b3 DF%-2d%s %6.1f \u00b5s%s%s  %s" R, "", r->df, r->dp ? " DP" : "", r->delay_us, res, rng, c);
             }
             put_cut(line, cols - 1);
             fputs(EL, stdout);

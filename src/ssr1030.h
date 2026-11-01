@@ -193,6 +193,7 @@ struct rx1090_rec {         /* a reply matched to a query, kept for display */
     uint8_t msg[14];
     float delay_us, res_us; /* res_us NAN without a position */
     int req_bds;            /* register the query asked for (BDS1*16+BDS2), -1 none */
+    bool dp;                /* reply with data parity (register overlaid on the address) */
     float excess_m;         /* radar->aircraft->antenna minus radar->antenna, NAN without a position lock */
     float h_m;              /* aircraft height above the radar (reply or recent altitude), NAN unknown */
     float adsb_m;           /* radar->aircraft from a recent ADS-B position, NAN none */

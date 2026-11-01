@@ -113,7 +113,7 @@
 
 struct raw { uint64_t ts; double wall; uint8_t len; uint8_t msg[14]; };
 struct reply { double r; uint32_t addr; int16_t code; uint8_t df, len; bool used; uint8_t msg[14]; };
-struct qrec { double t; uint32_t addr; int kind, code; };    /* roll-calls and UF11 (code) */
+struct qrec { double t; uint32_t addr; int kind, code; uint32_t rx; };  /* roll-calls (rx: DF20/21 syndrome) and UF11 (code) */
 struct acd {
     uint32_t addr;
     double delay, t, announced;     /* learned delay (no position), when, last announced to dump1090 */
@@ -425,12 +425,29 @@ static bool df_fits(int kind, int df)
     return df == 5 || df == 21;
 }
 
-/* can reply y answer query q? roll-calls by address and DF, UF11 by II/SI code */
+/* parity syndrome of the Comm-B reply (DF20/21) to roll-call it: its address,
+ * or with data parity (OVC set, Annex 10 Vol IV 3.1.2.6.11.2.5) the address
+ * XOR the requested register (BDS1,BDS2) in the top 8 bits, whatever the
+ * register. Short replies (DF4/5) always carry the plain address */
+static uint32_t long_syndrome(const struct interrog *it)
+{
+    int b1, b2;
+    if (modes_bds(it->msg, &b1, &b2) && modes_parity_req(it->msg)[0] == 'D')
+        return it->addr ^ (uint32_t)(b1 << 4 | b2) << 16;
+    return it->addr;
+}
+
+static uint32_t want_syndrome(uint32_t addr, uint32_t rx, int df) { return df == 20 || df == 21 ? rx : addr; }
+
+/* can reply y answer query q? roll-calls by address (syndrome) and DF, UF11 by II/SI code */
 static bool pair_ok(const struct qrec *q, const struct reply *y)
 {
     if (q->kind == K_UF11) return y->df == 11 && y->code == q->code;
-    return y->df != 11 && y->addr == q->addr && df_fits(q->kind, y->df);
+    return y->df != 11 && y->addr == want_syndrome(q->addr, q->rx, y->df) && df_fits(q->kind, y->df);
 }
+
+/* the aircraft that sent y in answer to q: a DP reply's syndrome is not its address */
+static uint32_t pair_addr(const struct qrec *q, const struct reply *y) { return q->kind == K_UF11 ? y->addr : q->addr; }
 
 static void unlock(void)
 {
@@ -549,7 +566,7 @@ static bool try_lock_geo(double t_now, bool recheck)
                 const struct reply *y = &rp[j % RP_N];
                 if (y->r > q->t + oc + LOCK_SPAN) break;
                 double d;
-                if (!pair_ok(q, y) || !predict(ac_get(y->addr, false), y->r, &d)) continue;
+                if (!pair_ok(q, y) || !predict(ac_get(pair_addr(q, y), false), y->r, &d)) continue;
                 double o = y->r - q->t - d + k0 * (t_now - q->t);
                 int b = (int)((o - base) / GEO_BIN);
                 if (b < 0 || b >= GEO_NB) continue;
@@ -558,7 +575,7 @@ static bool try_lock_geo(double t_now, bool recheck)
                     if (recheck && fabs(y->r - q->t - d - off_at(q->t)) < geo_tol(q->t)) ncur++;   /* fits the tracked clock */
                 } else if (b >= best && b < best + GEO_W) {
                     sum += o; nsum++;
-                    if (nwin < 256) { awin[nwin] = y->addr; twin[nwin++] = q->t; }
+                    if (nwin < 256) { awin[nwin] = pair_addr(q, y); twin[nwin++] = q->t; }
                     if (getenv("RX1090_DEBUG"))
                         fprintf(stderr, "  %.4f %-5s %06x DF%d delay %.1f us (predicted)\n", q->t, kind_name(q->kind),
                                 y->addr, y->df, 1e6 * d);
@@ -630,11 +647,11 @@ void rx1090_note_query(const struct interrog *it)
     if (it->tcas) return;
     if (it->kind == K_UF11) {
         int code = modes_own_code(it);
-        if (code > 0) qh[qh_n++ % QH_N] = (struct qrec){ it->t, NO_ADDR_RX, it->kind, code };
+        if (code > 0) qh[qh_n++ % QH_N] = (struct qrec){ it->t, NO_ADDR_RX, it->kind, code, NO_ADDR_RX };
         return;
     }
     if (!rollcall(it->kind)) return;
-    qh[qh_n++ % QH_N] = (struct qrec){ it->t, it->addr, it->kind, -1 };
+    qh[qh_n++ % QH_N] = (struct qrec){ it->t, it->addr, it->kind, -1, long_syndrome(it) };
     struct acd *a = ac_get(it->addr, true);
     double w = wall_now();
     if (a && w - a->announced > ANN_EVERY) {
@@ -878,6 +895,7 @@ static void keep(struct interrog *x, const struct reply *y, double d, float res_
     k->len = y->len;
     memcpy(k->msg, y->msg, y->len);
     k->delay_us = (float)(d * 1e6);
+    k->dp = (y->df == 20 || y->df == 21) && y->addr != x->addr;
     k->res_us = res_us;
     k->req_bds = req;
     k->excess_m = lock_geo ? (float)((d - TURNAROUND) * C_LIGHT) : NAN;
@@ -947,6 +965,7 @@ void rx1090_match(struct interrog *x)
     x->rep_idx = nrec;
     int req = -1, b1, b2;
     if (rc && modes_bds(x->msg, &b1, &b2)) req = b1 * 16 + b2;
+    uint32_t rx = rc ? long_syndrome(x) : NO_ADDR_RX;
 
     double off = off_at(x->t), lo = x->t + off + WIN_LO, hi = x->t + off + WIN_HI;
     uint64_t j = first_at(lo);
@@ -967,7 +986,7 @@ void rx1090_match(struct interrog *x)
         for (; j < rp_n; j++) {
             struct reply *y = &rp[j % RP_N];
             if (y->r > hi) break;
-            if (y->used || y->addr != x->addr || !df_fits(x->kind, y->df)) continue;
+            if (y->used || y->addr != want_syndrome(x->addr, rx, y->df) || !df_fits(x->kind, y->df)) continue;
             double d = y->r - x->t - off;
             if (lock_frames && d < TURNAROUND - 5e-6) continue;     /* exact clock: nothing before the turnaround */
             if (!first) { first = y; fd = d; }
