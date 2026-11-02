@@ -1093,7 +1093,7 @@ static void keep_ac(struct interrog *x, const struct acrep *y, double p1f1, doub
  * aircraft answers every A/C query of the beam dwell at the same delay
  * (within ACT_TOL) with the same code, replies to other interrogators land
  * anywhere. Tracks continue from one of the last ACT_PREV A/C queries of
- * any radar (the radar of a plain A/C query is not known yet), so the first
+ * any radar (the radar of a legacy A/C query is not known yet), so the first
  * reply of each aircraft in a dwell is missed.
  * Ghosts: a window also holds the replies to the next queries (shifted by
  * the repetition interval), which repeat just as well; a reply that
@@ -1101,7 +1101,7 @@ static void keep_ac(struct interrog *x, const struct acrep *y, double p1f1, doub
  * An aircraft whose ADS-B position predicts the delay (within the match
  * tolerance, and a Mode C altitude within AC_ALT_FT) names the reply; it
  * does not accept one by itself (too many aircraft fit 40 us).
- * Mode S transponders answer plain Mode A/C queries, not the A/C-only
+ * Mode S transponders answer legacy Mode A/C queries, not the A/C-only
  * all-call (short P4) nor the A/C/S all-call (long P4, DF11 instead). */
 static void match_ac(struct interrog *x)
 {
