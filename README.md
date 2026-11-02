@@ -10,7 +10,7 @@ It is based on [dump1030](https://github.com/Fuziih/dump1030).
 - **Radar analysis:** main-beam bursts, rotation period, dwell time, interrogation sequence within the beam, several radars told apart by their codes.
 - **Sidelobe detection:** Interrogations marked as sidelobes locally using P2/P5 pulses (note: aircraft might interprete them differently)
 - **Callsigns:** from short ADS-B windows on 1090 MHz, from [adsb.lol](https://adsb.lol), or from dump1090.
-- **Answered or not:** with a second 1090 MHz receiver that gives Beast output (for example dump1090 or readsb), matches 1090 MHz replies to the interrogations, marks answered ones and decodes what the aircraft replied (altitude, squawk, BDS 1,0/2,0/3,0/4,0/4,4/4,5/5,0/5,1/5,2/6,0).
+- **Answered or not:** with a second 1090 MHz receiver that gives Beast output (for example dump1090 or readsb), matches 1090 MHz replies to the interrogations (Mode A/C replies too, with `--rx1090-ac`), marks answered ones and decodes what the aircraft replied (altitude, squawk, BDS 1,0/2,0/3,0/4,0/4,4/4,5/5,0/5,1/5,2/6,0).
 - **bds_logger:** a separate small tool that reads only a Beast stream and prints Comm-B replies of ADS-B aircraft (BDS 1,0 capability, 2,0 callsign, 3,0 ACAS RA, 4,0 selected altitude, 4,4/4,5 meteo, 5,0 track and turn, 5,1/5,2 position, 6,0 heading and speed) with callsign and AMSL altitude. No HackRF needed.
 - **Live dashboard** with automatic gain, filters by radar, aircraft and interrogation type, and a burst chart. CSV log, IQ recording and replay.
 
@@ -118,7 +118,7 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - data parity: when a Comm-B request sets OVC (`DP` in the log), the transponder overlays the requested register on the address before the parity, so the DF20/21 reply's syndrome is the address XOR (BDS1,BDS2 << 16). It is matched by that syndrome, for whatever register the query asked for, and shown as `↳ DF20 DP` in the burst chart. Stock dump1090 drops such replies (the syndrome is not a known aircraft); a dump1090 patched to pass them on is needed;
   - UF11 by the II/SI code in the DF11 reply. II/SI codes are reused by distant radars (seen on air: SI37 DF11 replies to a radar with a ~5.0 s rotation), so with the geometry lock a DF11 reply must also arrive within 40 µs of its predicted time.
   - Delay: with an ADS-B position, only a reply at the predicted delay counts. Without one, the first matched reply sets the aircraft's delay, and for the next 60 s only replies near it count. Other radars interrogate the same aircraft, and their replies land at other delays (seen: one aircraft at 564, 798 and 1604 µs within 9 ms). Under the 1090-window clock "near" is 10 µs plus 2 µs per second since that reply (the aircraft moves), up to 250 µs; otherwise it is 250 µs.
-  - Mode A/C replies carry no address or radar code, so A/C queries are never marked.
+  - Mode A/C replies only with `--rx1090-ac` (below).
 - **Clock:** the two receivers have independent clocks, and a reply must be placed to within microseconds of its query. The dashboard line `1090 replies` shows the state. Until the clock is locked, nothing is marked, and queries are held 7 s so the scans that produce the lock can still be marked; the dashboard lags by that much while searching.
   - A reply follows its query by 128 µs (transponder turnaround, counted from the sync phase reversal 4.75 µs after P1) plus the extra path radar → aircraft → receiver.
 - **Sync from 1090 windows (default):** the HackRF briefly listens on 1090 MHz for 2 s (`--adsb-dwell`), placed right after a main-beam burst so no burst is lost. Its decoded ADS-B and DF11 frames carry HackRF sample times; dump1090 hears the same frames with its own sample times. Each identical frame (56 or 112 bits, good CRC) gives the clock offset directly.
@@ -154,10 +154,18 @@ Stock dump1090 drops DF4/5/20/21 replies from aircraft whose squitters (DF11 acq
   - Near the radar→antenna line two distances fit; both are shown (`2.2 or 5.8 NM`). There a 1 µs timing error moves the estimate by kilometres, while elsewhere it moves it by about 150 m.
   - With no altitude known, the aircraft is assumed to be at the radar's height.
   - When dump1090 has a recent ADS-B position, its distance follows in brackets, for comparison (`(ADS-B 2.3 NM)`).
+- **Mode A/C replies (`--rx1090-ac`):** ssr1030 asks dump1090 for Mode A/C replies (Beast command `0x1a '1' 'J'`) and matches them to plain Mode A/C and intermode queries. dump1090-fa decodes Mode A/C while a client asks for it unless it was started with `--no-modeac-auto` (`--modeac` turns it on for everyone); its Mode A/C decoder needs the default 2.4 MHz sample rate.
+  - Timing: the reply's first framing pulse F1 follows P3 by 3.0 µs (P3 is 8 µs after P1 in Mode A, 21 µs in Mode C), plus the extra path. dump1090 stamps an A/C reply at F2 (F1 + 20.3 µs) but a Mode S frame at its preamble + 64 µs, which the clock offset is based on; ssr1030 corrects for that.
+  - A reply carries only a squawk or an altitude, no address and no radar code. It belongs to a query when the same aircraft answers the next queries of the beam dwell at the same delay (within 0.5 µs) with the same code: a track. Replies to other interrogators, and false decodes, land anywhere. A track continues from one of the last 4 A/C queries of any radar, so each aircraft's first reply in a dwell is missed.
+  - A query window also holds the replies to the following queries, shifted by the repetition interval, and with a constant interval they repeat as well as real ones. A reply that continues a track as the reply of a later query is left to that query.
+  - With `--radar-pos`/`--rx-pos`, an aircraft whose ADS-B position predicts the delay (within 40 µs, and for Mode C an altitude within 200 ft) names the reply (`<- RYR48SC (ADS-B position)`). The difference to the prediction checks the timing constants: the dashboard and the exit summary show its rms.
+  - A Mode A query's replies show the squawk, a Mode C query's the altitude (or `alt ? (code …)` for a code that is not a valid altitude); `SPI` when the ident pulse is set. In the burst chart: `↳ A/C C  134.0 µs …`, the delay counted from P1 to F1.
+  - Mode S transponders answer plain Mode A/C queries with Mode A/C, but not the A/C-only all-call (short P4) nor the A/C/S all-call (long P4, which they answer with DF11).
+  - The dashboard's `1090 replies` line adds `A/C answered/checked` and the replies received. In a simulation with 2000 random replies/s, 0–3 of 139 random replies were accepted per 60 ms dwell; at 6000/s about 3 %.
 - **Autofreeze (`F`):** arms a one-shot freeze. The first burst with a matched reply freezes the screen and opens it in the burst chart; `space` returns to live, and `F` returns to live and arms it again. The status line shows `AUTOFREEZE` while armed. Without `--rx1090`, `F` only shows a hint.
 - **Beep (`--beep`):** rings the terminal bell once for every burst with at least one matched reply, with or without autofreeze. This includes the burst that triggers autofreeze.
 - **Callsigns:** DF17 identification and Comm-B BDS 2,0 from dump1090 fill the callsign table, so `-B` is not needed. The 1090 windows used for the clock sync also run the `-B` decoder, so its callsigns count too.
-- **Debug:** `RX1090_DEBUG=1` prints each lock attempt to stderr. `RX1090_LOG=FILE` writes every reply (12 MHz time in s, DF, address, II/SI code, hex) and the clock data, for offline analysis.
+- **Debug:** `RX1090_DEBUG=1` prints each lock attempt to stderr. `RX1090_LOG=FILE` writes every reply (12 MHz time in s, DF, address, II/SI code, hex; Mode A/C replies as `A time code`) and the clock data, for offline analysis.
 
 ## ADS-B callsigns
 
@@ -387,6 +395,7 @@ The interleaving statistics use the same tokens, without the target numbers.
   - `answered` is 1 when a reply was heard and 0 when none was heard. It is `-` when the query could not be checked: no `--rx1090`, clock not locked yet, or a query type that is not matched.
   - `reply_us` is the reply delay after the query in µs: 128 µs turnaround plus the extra path. It carries a small constant error from the clock lock.
   - `replies` is the number of DF11 replies for UF11, and 1 for a roll-call.
+  - Mode A/C queries (`--rx1090-ac`): `reply_df` is `AC`, `reply_us` the delay from P1 to F1 of the earliest reply, `replies` the number of A/C replies.
 
 ## bds_logger
 

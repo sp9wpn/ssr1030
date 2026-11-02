@@ -199,11 +199,16 @@ struct rx1090_rec {         /* a reply matched to a query, kept for display */
     float adsb_m;           /* radar->aircraft from a recent ADS-B position, NAN none */
     double ref_lat, ref_lon;/* aircraft position known at the reply (ADS-B, else its last BDS 5,1), NAN none:
                                resolves the BDS 5,2 fine position */
+    char ac_mode;           /* Mode A/C reply (--rx1090-ac): 'A' or 'C' after the query's mode, 0 Mode S;
+                               msg[0..1] = code as dump1090 gives it (0xABCD, one octal digit per nibble,
+                               0x0080 SPI), delay_us = P1 -> F1 */
+    uint32_t ac_addr;       /* Mode A/C: the aircraft whose ADS-B position predicts this reply, 0 none */
 };
 bool bds51_pos(const uint8_t *msg, double *lat, double *lon);   /* modes.c: valid BDS 5,1 coarse position */
 const struct rx1090_rec *rx1090_rec_get(uint64_t idx);   /* NULL once overwritten */
 void reply_describe(const struct rx1090_rec *r, char *buf, size_t n);   /* modes.c: decoded content */
 int reply_alt_ft(const uint8_t *msg, int df);            /* modes.c: DF4/20 altitude, INT32_MIN none */
+int modec_ft(unsigned code);                             /* modes.c: Mode C reply (0xABCD as dump1090 gives it), INT32_MIN invalid */
 int rx1090_range(const struct rx1090_rec *r, double az, double out_m[2]);   /* radar->aircraft for antenna
                             angle az (rad) from the antenna direction: 0-2 solutions */
 struct rx1090_stats {
@@ -226,9 +231,15 @@ struct rx1090_stats {
     double sync_iv;         /* s between sync windows now */
     long rc, rc_ans;        /* roll-calls checked / answered (since lock) */
     long ac, ac_ans;        /* UF11 all-calls checked / answered */
+    bool modeac;            /* --rx1090-ac: Mode A/C replies requested and matched */
+    long acr;               /* Mode A/C replies received */
+    long acq, acq_ans;      /* Mode A/C queries checked / answered */
+    long ac_attr;           /* Mode A/C replies tied to an aircraft by its ADS-B position */
+    double ac_res_rms_us;   /* their delay minus the predicted one, rms (checks the timing constants) */
     char peer[128];
 };
 int rx1090_start(const char *hostport);              /* starts the reader thread, -1 on bad address */
+void rx1090_set_modeac(bool on);                     /* before rx1090_start: ask dump1090 for Mode A/C replies */
 void rx1090_stop(void);
 void rx1090_hclock(double t, double wall);           /* HackRF stream time t arrived at host time wall */
 void rx1090_clock_reset(void);                       /* HackRF samples were lost: lock again */

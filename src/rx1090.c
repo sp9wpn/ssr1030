@@ -24,7 +24,7 @@
  *    the last minute of pairs; when nothing fits the tracked clock and
  *    another offset is clear, it re-locks there
  * Roll-calls (UF4/5/20/21) match by address, UF11 by the II/SI code in the
- * DF11 reply. Mode A/C replies carry neither and are not matched.
+ * DF11 reply. Mode A/C replies carry neither (see match_ac, --rx1090-ac).
  * The second receiver usually hears only some of the replies (antenna
  * placement), so an unheard reply never counts against the lock; only
  * replies from the aircraft that do not fit the expected delay do.
@@ -111,6 +111,21 @@
 #define C_LIGHT     299792458.0
 #define RES_N       64
 #define REC_N       16384           /* matched replies kept for display */
+/* Mode A/C replies (--rx1090-ac). F1 follows P3 by 3.0 us (+-0.5); P3 is 8
+ * (Mode A) or 21 us (Mode C) after P1. dump1090 stamps an A/C reply at F2
+ * (F1 + 20.3 us) but a Mode S frame at its preamble + 64 us, and the offset
+ * is defined on Mode S frames (r = t_preamble + off - SYNC_REF), so an A/C
+ * reply's F1 at stream time T has r = T + off + AC_STAMP */
+#define AC_REPLY    3.0e-6
+#define AC_STAMP    ((20.3 - 64.0) * 1e-6 - SYNC_REF)
+#define AC_SPAN     (WIN_HI - TURNAROUND)   /* extra path searched: as for Mode S */
+#define ACP_N       65536           /* Mode A/C replies kept for matching */
+#define ACT_N       512             /* delay tracks */
+#define ACT_TOL     0.5e-6          /* the same aircraft on consecutive queries: extra path within this */
+#define ACT_PREV    4               /* ... continued from one of the last this many A/C queries (any radar) */
+#define ACH_N       4096            /* A/C queries noted (all radars, before matching) */
+#define AC_CAND     256             /* aircraft with positions considered per query */
+#define AC_ALT_FT   200             /* Mode C reply within this of the aircraft's altitude */
 
 struct raw { uint64_t ts; double wall; uint8_t len; uint8_t msg[14]; };
 struct reply { double r; uint32_t addr; int16_t code; uint8_t df, len; bool used; uint8_t msg[14]; };
@@ -141,6 +156,18 @@ static uint64_t ann_w, ann_r;
 /* main thread */
 static struct reply rp[RP_N];
 static uint64_t rp_n;
+struct acrep { double r; uint16_t code; bool used; };
+static struct acrep acp[ACP_N];     /* Mode A/C replies, time order */
+static uint64_t acp_n;
+struct actrk { double e; uint64_t qi; int n, code_a, code_c; };   /* code_*: -1 not seen */
+static struct actrk act_trk[ACT_N]; /* extra path seen on recent A/C queries */
+static int act_w;
+struct ach { double t, d0; };
+static struct ach ach[ACH_N];       /* every A/C query as noted: stream time, reply delay without extra path */
+static uint64_t ach_n;
+static bool modeac_on;              /* --rx1090-ac */
+static double ac_res[RES_N];
+static long nac_res;
 static struct qrec qh[QH_N];
 static uint64_t qh_n;
 static struct acd act[AC_N];
@@ -274,6 +301,12 @@ static void *reader(void *arg)
             continue;
         }
         connected = true;
+        if (modeac_on) {
+            /* Beast command: Mode A/C on (dump1090-fa/readsb decode it while a client asks, unless
+             * started with --no-modeac-auto; --modeac turns it on for everyone) */
+            static const uint8_t cmd_j[3] = { 0x1a, '1', 'J' };
+            send(fd, cmd_j, sizeof(cmd_j), MSG_NOSIGNAL);
+        }
         int state = 0, need = 0, fn = 0, type = 0;
         bool esc = false;
         while (!quit) {
@@ -292,7 +325,7 @@ static void *reader(void *arg)
                     if (state == 2) {
                         f[fn++] = c;
                         if (fn == need) {
-                            if (type != '1') push(f, need - 7, wall);
+                            if (type != '1' || modeac_on) push(f, need - 7, wall);
                             state = 0;
                         }
                         continue;
@@ -346,6 +379,8 @@ void rx1090_stop(void)
 }
 
 /* ---------------- main thread ---------------- */
+
+void rx1090_set_modeac(bool on) { modeac_on = on; S.modeac = on; }
 
 void rx1090_set_geometry(double rlat, double rlon, double ralt, double xlat, double xlon, double xalt)
 {
@@ -644,9 +679,13 @@ void rx1090_hclock(double t, double wall)
     minage_put(&hw, wall - t, wall);
 }
 
+static bool ac_kind(int k);
+static double ac_d0(int kind, double *p1f1);
+
 void rx1090_note_query(const struct interrog *it)
 {
     if (it->tcas) return;
+    if (ac_kind(it->kind)) { ach[ach_n++ % ACH_N] = (struct ach){ it->t, ac_d0(it->kind, NULL) }; return; }
     if (it->kind == K_UF11) {
         int code = modes_own_code(it);
         if (code > 0) qh[qh_n++ % QH_N] = (struct qrec){ it->t, NO_ADDR_RX, it->kind, code, NO_ADDR_RX };
@@ -798,6 +837,12 @@ void rx1090_poll(double t_now)
         last_r = r;
         last_rx_wall = w->wall;
         minage_put(&rw, w->wall - r, w->wall);
+        if (w->len == 2) {                              /* Mode A/C reply */
+            acp[acp_n++ % ACP_N] = (struct acrep){ r, (uint16_t)(w->msg[0] << 8 | w->msg[1]), false };
+            S.acr++;
+            if (rlog) fprintf(rlog, "A %.7f %04x\n", r, w->msg[0] << 8 | w->msg[1]);
+            continue;
+        }
         S.frames++;
         int nbits = w->len * 8, df = w->msg[0] >> 3;
         if (nbits != 56 && nbits != 112) continue;
@@ -959,6 +1004,177 @@ const struct rx1090_rec *rx1090_rec_get(uint64_t idx)
     return idx < nrec && nrec - idx <= REC_N ? &recs[idx % REC_N] : NULL;
 }
 
+/* ---------------- Mode A/C replies ---------------- */
+
+static bool ac_kind(int k)
+{
+    return k == K_MODEA || k == K_MODEC || k == K_ACONLY_A || k == K_ACONLY_C || k == K_ACS_A || k == K_ACS_C;
+}
+
+static uint64_t ac_first_at(double x)
+{
+    uint64_t lo = acp_n > ACP_N ? acp_n - ACP_N : 0, hi = acp_n;
+    while (lo < hi) {
+        uint64_t m = lo + (hi - lo) / 2;
+        if (acp[m % ACP_N].r < x) lo = m + 1; else hi = m;
+    }
+    return lo;
+}
+
+/* P1 -> F1 without extra path, and the same as a reply delay r - t - off */
+static double ac_d0(int kind, double *p1f1)
+{
+    bool mc = kind == K_MODEC || kind == K_ACONLY_C || kind == K_ACS_C;
+    double f = (mc ? 21e-6 : 8e-6) + AC_REPLY;
+    if (p1f1) *p1f1 = f;
+    return f + AC_STAMP;
+}
+
+/* index of the noted A/C query at stream time t, ach_n if not found */
+static uint64_t ach_find(double t)
+{
+    uint64_t lo = ach_n > ACH_N ? ach_n - ACH_N : 0;
+    for (uint64_t i = ach_n; i-- > lo;) {
+        if (fabs(ach[i % ACH_N].t - t) < 1e-9) return i;
+        if (ach[i % ACH_N].t < t - 1.0) break;
+    }
+    return ach_n;
+}
+
+static bool code_fits(const struct actrk *a, char mode, unsigned code)
+{
+    int was = mode == 'A' ? a->code_a : a->code_c;
+    if (was < 0 || was == (int)(code & 0x7777)) return true;
+    if (mode == 'A') return false;
+    int f0 = modec_ft((unsigned)was), f1 = modec_ft(code);
+    return f0 != INT32_MIN && f1 != INT32_MIN && abs(f0 - f1) <= 100;
+}
+
+/* the track an extra path e on A/C query qi continues: seen on one of the
+ * ACT_PREV queries before, with the same squawk / altitude; NULL none */
+static struct actrk *ac_track(uint64_t qi, double e, char mode, unsigned code)
+{
+    struct actrk *best = NULL;
+    for (int k = 0; k < ACT_N; k++) {
+        struct actrk *a = &act_trk[k];
+        if (!a->n || a->qi >= qi || qi - a->qi > ACT_PREV || fabs(e - a->e) > ACT_TOL) continue;
+        if (mode && !code_fits(a, mode, code)) continue;
+        if (!best || fabs(e - a->e) < fabs(e - best->e)) best = a;
+    }
+    return best;
+}
+
+static void keep_ac(struct interrog *x, const struct acrep *y, double p1f1, double e, char mode, uint32_t who, float res_us)
+{
+    struct rx1090_rec *k = &recs[nrec++ % REC_N];
+    memset(k, 0, sizeof(*k));
+    k->df = 0;
+    k->len = 2;
+    k->msg[0] = (uint8_t)(y->code >> 8);
+    k->msg[1] = (uint8_t)y->code;
+    k->ac_mode = mode;
+    k->ac_addr = who;
+    k->delay_us = (float)((p1f1 + e) * 1e6);
+    k->res_us = res_us;
+    k->req_bds = -1;
+    k->excess_m = lock_geo ? (float)(e * C_LIGHT) : NAN;
+    k->h_m = k->adsb_m = NAN;
+    k->ref_lat = k->ref_lon = NAN;
+    int ft = mode == 'C' ? modec_ft(y->code) : INT32_MIN;
+    struct acd *a = who ? ac_get(who, false) : NULL;
+    if (ft != INT32_MIN) k->h_m = (float)(ft * 0.3048 - g_ralt);
+    else if (a && a->h_t > 0 && fabs(y->r - a->h_t) < AC_AGE) k->h_m = (float)a->h;
+    if (a && geo_on && a->pos && fabs(y->r - a->pos_r) <= POS_AGE) k->adsb_m = (float)geo_dist(g_radar, a->ecef);
+    if (x->rep_n < 255) x->rep_n++;
+}
+
+/* Mode A/C replies carry no address, only a squawk or an altitude, so a
+ * reply belongs to this query when its extra path repeats: the same
+ * aircraft answers every A/C query of the beam dwell at the same delay
+ * (within ACT_TOL) with the same code, replies to other interrogators land
+ * anywhere. Tracks continue from one of the last ACT_PREV A/C queries of
+ * any radar (the radar of a plain A/C query is not known yet), so the first
+ * reply of each aircraft in a dwell is missed.
+ * Ghosts: a window also holds the replies to the next queries (shifted by
+ * the repetition interval), which repeat just as well; a reply that
+ * continues a track as the reply of a later noted query is left to it.
+ * An aircraft whose ADS-B position predicts the delay (within the match
+ * tolerance, and a Mode C altitude within AC_ALT_FT) names the reply; it
+ * does not accept one by itself (too many aircraft fit 40 us).
+ * Mode S transponders answer plain Mode A/C queries, not the A/C-only
+ * all-call (short P4) nor the A/C/S all-call (long P4, DF11 instead). */
+static void match_ac(struct interrog *x)
+{
+    double p1f1, d0 = ac_d0(x->kind, &p1f1);
+    char mode = x->kind == K_MODEC || x->kind == K_ACONLY_C || x->kind == K_ACS_C ? 'C' : 'A';
+    double off = off_at(x->t), tol = geo_tol(x->t);
+    double lo = x->t + off + d0 - tol, hi = x->t + off + d0 + AC_SPAN;
+    uint64_t qi = ach_find(x->t);
+    x->checked = true;
+    x->rep_idx = nrec;
+    S.acq++;
+    if (qi == ach_n) return;                            /* not noted (cannot happen) */
+    /* aircraft whose reply time follows from their ADS-B position */
+    struct { double e; uint32_t addr; int ft; } cd[AC_CAND];
+    int nc = 0;
+    if (lock_geo)
+        for (int k = 0; k < AC_N && nc < AC_CAND; k++) {
+            struct acd *a = &act[k];
+            double pd;
+            if (!a->used || !predict(a, x->t + off, &pd)) continue;
+            cd[nc].e = pd - TURNAROUND;
+            cd[nc].addr = a->addr;
+            cd[nc].ft = a->h_t > 0 && fabs(x->t + off - a->h_t) < AC_AGE ? (int)lround((a->h + g_ralt) / 0.3048) : INT32_MIN;
+            nc++;
+        }
+    for (uint64_t j = ac_first_at(lo); j < acp_n; j++) {
+        struct acrep *y = &acp[j % ACP_N];
+        if (y->r > hi) break;
+        if (y->used) continue;
+        double d = y->r - x->t - off, e = d - d0;
+        /* the reply of a later query? (codes are not checked: its mode may differ) */
+        bool later = false;
+        for (uint64_t q = qi + 1; q < ach_n && !later; q++) {
+            const struct ach *h = &ach[q % ACH_N];
+            if (y->r < h->t + off + h->d0 - tol) break;
+            later = ac_track(q, y->r - h->t - off - h->d0, 0, 0) != NULL;
+        }
+        if (later) continue;
+        struct actrk *tr = ac_track(qi, e, mode, y->code);
+        if (!tr) {                                       /* new: the next query may continue it */
+            tr = &act_trk[act_w++ % ACT_N];
+            *tr = (struct actrk){ e, qi, 1, -1, -1 };
+            if (mode == 'A') tr->code_a = y->code & 0x7777; else tr->code_c = y->code & 0x7777;
+            continue;
+        }
+        tr->n++; tr->qi = qi; tr->e = e;
+        if (mode == 'A') tr->code_a = y->code & 0x7777; else tr->code_c = y->code & 0x7777;
+        y->used = true;
+        /* name it from a predicted aircraft */
+        int ft = mode == 'C' ? modec_ft(y->code) : INT32_MIN, nwho = 0;
+        uint32_t who = 0;
+        double bde = tol, pe = 0;
+        for (int c = 0; c < nc; c++) {
+            double de = fabs(e - cd[c].e);
+            if (de >= tol) continue;
+            if (ft != INT32_MIN && cd[c].ft != INT32_MIN && abs(ft - cd[c].ft) > AC_ALT_FT) continue;
+            nwho++;
+            if (de < bde) { bde = de; who = cd[c].addr; pe = cd[c].e; }
+        }
+        if (nwho > 1 && ft == INT32_MIN) who = 0;       /* two aircraft fit and no altitude to choose */
+        float res_us = NAN;
+        if (who) {
+            res_us = (float)((e - pe) * 1e6);
+            ac_res[nac_res++ % RES_N] = e - pe;
+            S.ac_attr++;
+        }
+        keep_ac(x, y, p1f1, e, mode, who, res_us);
+        if (!x->nreplies || (p1f1 + e) * 1e6 < x->reply_us) x->reply_us = (float)((p1f1 + e) * 1e6);
+        if (x->nreplies < 255) x->nreplies++;
+    }
+    if (x->nreplies) { x->answered = true; S.acq_ans++; }
+}
+
 void rx1090_match(struct interrog *x)
 {
     x->answered = false;
@@ -969,6 +1185,7 @@ void rx1090_match(struct interrog *x)
     x->checked = false;
     x->rep_n = 0;
     if (!locked || x->tcas) return;
+    if (ac_kind(x->kind)) { if (modeac_on) match_ac(x); return; }
     bool rc = rollcall(x->kind);
     int code = x->kind == K_UF11 ? modes_own_code(x) : -1;
     if (!rc && code <= 0) return;           /* code 0 = II0: indistinguishable from squitters */
@@ -1068,5 +1285,9 @@ void rx1090_get_stats(struct rx1090_stats *s)
     for (long k = 0; k < n; k++) ss += res[k] * res[k];
     S.res_rms_us = n ? 1e6 * sqrt(ss / n) : NAN;
     S.nres = nres;
+    n = nac_res < RES_N ? nac_res : RES_N;
+    ss = 0;
+    for (long k = 0; k < n; k++) ss += ac_res[k] * ac_res[k];
+    S.ac_res_rms_us = n ? 1e6 * sqrt(ss / n) : NAN;
     *s = S;
 }

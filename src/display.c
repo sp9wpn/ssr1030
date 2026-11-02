@@ -313,7 +313,9 @@ static void draw_graph(int cols, int rows)
                 if (nr) o += snprintf(rng + o, sizeof(rng) - o, " NM");
                 if (!isnan(r->adsb_m)) snprintf(rng + o, sizeof(rng) - o, "%s(ADS-B %.1f NM)", nr ? " " : "  ", r->adsb_m / 1852);
                 reply_describe(r, c, sizeof(c));
-                snprintf(line, sizeof(line), "%22s" CYN "\u21b3 DF%-2d%s %6.1f \u00b5s%s%s  %s" R, "", r->df, r->dp ? " DP" : "", r->delay_us, res, rng, c);
+                if (r->ac_mode)     /* Mode A/C: delay from P1 to the reply's F1 */
+                    snprintf(line, sizeof(line), "%22s" CYN "\u21b3 A/C %c %6.1f \u00b5s%s%s  %s" R, "", r->ac_mode, r->delay_us, res, rng, c);
+                else snprintf(line, sizeof(line), "%22s" CYN "\u21b3 DF%-2d%s %6.1f \u00b5s%s%s  %s" R, "", r->df, r->dp ? " DP" : "", r->delay_us, res, rng, c);
             }
             put_cut(line, cols - 1);
             fputs(EL, stdout);
@@ -524,6 +526,12 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
                 if (x.rc) printf(" (%.0f%%)", 100.0 * x.rc_ans / x.rc);
                 printf("  UF11 %ld/%ld", x.ac_ans, x.ac);
                 if (x.ac) printf(" (%.0f%%)", 100.0 * x.ac_ans / x.ac);
+                if (x.modeac) {
+                    printf("  A/C %ld/%ld", x.acq_ans, x.acq);
+                    if (x.acq) printf(" (%.0f%%)", 100.0 * x.acq_ans / x.acq);
+                    printf(DIM " %ld replies in" R, x.acr);
+                    if (x.ac_attr) printf(DIM ", %ld named, rms %.1f us" R, x.ac_attr, x.ac_res_rms_us);
+                }
             }
         }
         fputs(EL, stdout);

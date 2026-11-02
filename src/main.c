@@ -30,7 +30,7 @@ static struct {
     int dens_max;
     const char *file, *record, *log, *serial, *adsb_db, *rx1090, *radar_pos, *rx_pos;
     char sep;
-    bool list, dashboard, quiet, show_tcas, beep, no_sync, dwell_set, adsb_cs;   /* adsb_cs: -B given */
+    bool list, dashboard, quiet, show_tcas, beep, no_sync, dwell_set, adsb_cs, rx1090_ac;   /* adsb_cs: -B given */
     double duration;
     bool adsb;
     double adsb_every, adsb_dwell;
@@ -646,11 +646,16 @@ static void usage(void)
 "                         roll-called addresses are fed to its Beast input (port 30004)\n"
 "                         and mark answered queries with '*': roll-calls by aircraft address,\n"
 "                         UF11 by the II/SI code in DF11; also supplies callsigns. Mode A/C\n"
-"                         replies are not matched. Live HackRF only. The clock is synced by\n"
+"                         replies only with --rx1090-ac. Live HackRF only. The clock is synced by\n"
 "                         short HackRF windows on 1090 MHz (--adsb-dwell s, default 2 with\n"
 "                         --rx1090): frames heard by both radios. Every 30 s at first, doubling\n"
 "                         up to 5 min while the clock holds; with -B on the -B schedule\n"
 "      --no-1090-sync     no 1090 windows: lock the clock from replies only\n"
+"      --rx1090-ac        also Mode A/C replies: asks dump1090 for them (Beast command; dump1090\n"
+"                         decodes them while asked unless started with --no-modeac-auto) and\n"
+"                         matches them to Mode A/C queries: the same delay on consecutive queries,\n"
+"                         or an aircraft's predicted delay (--radar-pos/--rx-pos), which also\n"
+"                         names it. Squawk or altitude after the query's mode\n"
 "      --radar-pos LAT,LON[,ALT_M]|NAME  radar position and\n"
 "      --rx-pos LAT,LON[,ALT_M]|NAME     1090 antenna position: the reply delay is then predicted from\n"
 "                         each aircraft's ADS-B position, which locks the clock from 2 replies\n"
@@ -722,7 +727,7 @@ int main(int argc, char **argv)
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
         { "no-auto-gain", 0, 0, 17 }, { "rx1090", 2, 0, 18 }, { "radar-pos", 1, 0, 19 }, { "rx-pos", 1, 0, 20 },
         { "beep", 0, 0, 22 }, { "no-1090-sync", 0, 0, 23 }, { "adsb-gain", 1, 0, 24 }, { "graph-floor", 1, 0, 26 }, { "busy-gap", 1, 0, 27 },
-        { "human", 0, 0, 28 }, { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
+        { "human", 0, 0, 28 }, { "rx1090-ac", 0, 0, 29 }, { "help", 0, 0, 'h' }, { 0, 0, 0, 0 }
     };
     int c;
     while ((c = getopt_long(argc, argv, "f:w:s:l:g:a:t:o:Ldqr:SCcRiIA:Bh", lo, NULL)) != -1) {
@@ -797,6 +802,7 @@ int main(int argc, char **argv)
         case 19: opt.radar_pos = optarg; break;
         case 20: opt.rx_pos = optarg; break;
         case 28: bds_human = true; break;
+        case 29: opt.rx1090_ac = true; break;
         default: usage(); return c == 'h' ? 0 : 1;
         }
     }
@@ -813,6 +819,7 @@ int main(int argc, char **argv)
     bool dash = !opt.list && !opt.quiet && (live || opt.dashboard);
     if (opt.adsb && !live) { fprintf(stderr, "--adsb needs the HackRF; ignored in --file mode\n"); opt.adsb = false; }
     if (opt.rx1090 && !live) { fprintf(stderr, "--rx1090 needs the live HackRF; ignored in --file mode\n"); opt.rx1090 = NULL; }
+    if (opt.rx1090_ac && !opt.rx1090) { fprintf(stderr, "--rx1090-ac needs --rx1090; ignored\n"); opt.rx1090_ac = false; }
     if (opt.rx1090) {
         /* 1090 windows sync the clock to dump1090 (identical frames); callsigns come from dump1090 anyway */
         opt.adsb_cs = opt.adsb;             /* -B: windows on its fixed schedule; otherwise only as the sync needs */
@@ -852,6 +859,7 @@ int main(int argc, char **argv)
     hackrf_device *dev = NULL;
     struct run_info ri = { .fs = opt.fs, .freq = opt.freq, .live = live, .adsb = opt.adsb, .rx1090 = opt.rx1090 != NULL };
     if (opt.rx1090) {
+        if (opt.rx1090_ac) rx1090_set_modeac(true);
         if (rx1090_start(opt.rx1090) < 0) { fprintf(stderr, "--rx1090: bad address '%s' (HOST:PORT)\n", opt.rx1090); return 1; }
         analysis_set_rx(rx1090_ready, rx1090_match);
         if (opt.adsb) adsb_set_frame_hook(rx1090_hframe);
@@ -1095,6 +1103,9 @@ int main(int argc, char **argv)
                 x.peer, x.frames, x.npos, x.locks, x.locked ? "" : ", not locked at the end",
                 x.locked && x.geo ? " (from positions)" : "", x.relocks, x.drift_ppm, x.rc_ans, x.rc, x.ac_ans, x.ac);
         if (x.geo && x.nres) fprintf(sf, "; residual rms %.1f us over %ld matches", x.res_rms_us, x.nres);
+        if (x.modeac)
+            fprintf(sf, "; Mode A/C: %ld replies received, queries answered %ld/%ld, %ld replies named by position (residual rms %.1f us)",
+                    x.acr, x.acq_ans, x.acq, x.ac_attr, x.ac_res_rms_us);
         if (x.sync_windows)
             fprintf(sf, "; clock synced by %ld 1090 windows (last: %d frames, rms %.2f us)%s", x.sync_windows, x.sync_n,
                     x.sync_rms_us, x.frames_lock ? "" : ", windows stopped");

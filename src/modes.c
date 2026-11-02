@@ -343,6 +343,13 @@ static int alt13(unsigned v, char *buf, size_t n)
     return ft == INT32_MIN ? snprintf(buf, n, "alt ?") : snprintf(buf, n, "alt %d ft", ft);
 }
 
+int modec_ft(unsigned code)
+{
+    if (code & 0x0080) return INT32_MIN;                /* SPI: not an altitude reply */
+    int h = gillham(code & 0x7777);
+    return h == INT32_MIN ? INT32_MIN : h * 100;
+}
+
 int reply_alt_ft(const uint8_t *msg, int df)
 {
     return df == 4 || df == 20 ? ac13_ft(getbits(msg, 20, 32)) : INT32_MIN;
@@ -454,6 +461,17 @@ void reply_describe(const struct rx1090_rec *r, char *buf, size_t n)
 {
     const uint8_t *m = r->msg;
     int o = 0;
+    if (r->ac_mode) {
+        unsigned code = (unsigned)(m[0] << 8 | m[1]);
+        if (r->ac_mode == 'A') o = snprintf(buf, n, "squawk %04x", code & 0x7777);
+        else {
+            int ft = modec_ft(code);
+            o = ft == INT32_MIN ? snprintf(buf, n, "alt ? (code %04x)", code & 0x7777) : snprintf(buf, n, "alt %d ft", ft);
+        }
+        if (code & 0x0080) o += snprintf(buf + o, n - o, " SPI");
+        if (r->ac_addr && o < (int)n) snprintf(buf + o, n - o, "  <- %s (ADS-B position)", ac_name(r->ac_addr));
+        return;
+    }
     switch (r->df) {
     case 11: o = snprintf(buf, n, "%06x", getbits(m, 9, 32)); break;   /* only what the reply carries */
     case 4: case 20: o = alt13(getbits(m, 20, 32), buf, n); break;

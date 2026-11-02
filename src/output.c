@@ -69,7 +69,10 @@ void output_write(const struct interrog *it, double start_epoch)
     if (!it->checked) fprintf(out, "%c-%c-%c-%c-%c-\n", s, s, s, s, s);
     else if (!it->answered) fprintf(out, "%c0%c-%c-%c0%c-\n", s, s, s, s, s);
     else {
-        fprintf(out, "%c1%c%d%c%.1f%c%d%c", s, s, it->reply_df, s, it->reply_us, s, it->uf == 11 ? it->nreplies : 1, s);
+        if (kind_is_modes(it->kind))
+            fprintf(out, "%c1%c%d%c%.1f%c%d%c", s, s, it->reply_df, s, it->reply_us, s, it->uf == 11 ? it->nreplies : 1, s);
+        else    /* Mode A/C (--rx1090-ac): reply_us = P1 -> F1 of the first reply */
+            fprintf(out, "%c1%cAC%c%.1f%c%d%c", s, s, s, it->reply_us, s, it->nreplies, s);
         if (isnan(it->reply_res_us)) fputs("-\n", out); else fprintf(out, "%.1f\n", it->reply_res_us);
     }
 }
