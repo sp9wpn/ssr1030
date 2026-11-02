@@ -86,6 +86,7 @@ struct radar {
     int nbursts;             /* complete bursts */
     int npartial;
     double last_peak;
+    double last_end;         /* end of the last committed burst, complete or partial */
     bool gap_since;          /* an ADS-B gap happened since last_peak */
     double periods[64]; int np;
     double dwell_sum;
@@ -122,7 +123,6 @@ struct analysis_state {
     struct open_burst ob[NCLS];
     struct burst hist[BURST_HIST];
     int nhist;                  /* total committed bursts */
-    double last_burst_end;
     struct radar radars[MAX_RADARS];
     int nradars;
 

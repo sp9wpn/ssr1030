@@ -120,7 +120,6 @@ void analysis_init(const struct analysis_cfg *cfg)
     AS.bg_db = AS.bg_ac = -20;
     for (int c = 0; c < NCLS; c++) AS.prev_tok[c] = -1;
     pending_clear();
-    AS.last_burst_end = -1;
     AS.gap_end = -1e9;
     for (int k = 0; k < AC_MAX; k++) AS.tgt[k] = k < cfg->nac ? cfg->ac[k].addr : -1;
     target_ver = ~0u;
@@ -183,7 +182,9 @@ static struct radar *radar_get(int code)
 /* a radar identified by its queries: II/SI code, or a legacy Mode A/C radar */
 static bool known_code(int code) { return code >= 0 || code == CODE_LEGACY_AC; }
 
-double analysis_rotation(void)
+/* the radar the rotation and the window placement follow: the selected one,
+ * else the identified radar with the most bursts */
+static struct radar *main_radar(void)
 {
     struct radar *best = NULL;
     for (int r = 0; r < AS.nradars; r++) {
@@ -192,6 +193,12 @@ double analysis_rotation(void)
         if (!known_code(X->code) && AS.cfg.radar_sel < 0 && best) continue;
         if (!best || X->nbursts > best->nbursts || (!known_code(best->code) && known_code(X->code))) best = X;
     }
+    return best;
+}
+
+double analysis_rotation(void)
+{
+    struct radar *best = main_radar();
     if (!best || best->np == 0) return 0;
     return median_d(best->periods, best->np < 64 ? best->np : 64);
 }
@@ -206,7 +213,13 @@ double analysis_rotation_of(const char *key)
     return 0;
 }
 
-double analysis_last_burst_end(void) { return AS.last_burst_end; }
+/* end of the main radar's last burst: 1090 windows are placed after it, so
+ * its next pass is not lost (another radar's burst would give the wrong phase) */
+double analysis_last_burst_end(void)
+{
+    struct radar *r = main_radar();
+    return r && r->nbursts + r->npartial ? r->last_end : -1;
+}
 
 int analysis_main_code(void)
 {
@@ -688,6 +701,7 @@ static void commit(struct burst *b)
 {
     struct radar *r = radar_get(b->code);
     snprintf(b->key, sizeof(b->key), "%s", r->key);
+    r->last_end = b->t1;
     b->period = 0;
     if (b->partial) {
         r->npartial++;
@@ -812,7 +826,6 @@ static void finish(struct pendb *p)
 {
     struct open_burst *o = &p->ob;
     p->used = false;
-    if (p->valid && burst_code_ok(p->code)) AS.last_burst_end = o->t1;
     if (!p->valid || p->rec.nall == 0 || !burst_code_ok(p->code)) return;
     struct burst *rec = &p->rec;
     double margin = o->t1 - o->t0;

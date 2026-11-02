@@ -64,7 +64,9 @@ struct interrog {
     bool answered;      /* a reply was matched: roll-call by address, UF11 by II/SI */
     uint8_t reply_df;   /* DF of the (first) reply, 0 none */
     uint8_t nreplies;   /* UF11: DF11 replies matched */
-    float reply_us;     /* reply delay after the query, us (128 us turnaround + extra path) */
+    float reply_us;     /* reply delay, us, without the transponder's own delay: the extra path
+                           radar -> aircraft -> receiver (Mode S: after sync reversal + 128 us,
+                           Mode A/C: after P3 + 3 us) */
     float reply_res_us; /* measured - predicted from the aircraft's position (geometry lock), NAN unknown */
     uint64_t rep_idx;   /* first matched reply in the rx1090 record store, rep_n of them */
     uint8_t rep_n;
@@ -201,7 +203,7 @@ struct rx1090_rec {         /* a reply matched to a query, kept for display */
                                resolves the BDS 5,2 fine position */
     char ac_mode;           /* Mode A/C reply (--rx1090-ac): 'A' or 'C' after the query's mode, 0 Mode S;
                                msg[0..1] = code as dump1090 gives it (0xABCD, one octal digit per nibble,
-                               0x0080 SPI), delay_us = P1 -> F1 */
+                               0x0080 SPI), delay_us = the extra path (as reply_us) */
     uint32_t ac_addr;       /* Mode A/C: the aircraft whose ADS-B position predicts this reply, 0 none */
 };
 bool bds51_pos(const uint8_t *msg, double *lat, double *lon);   /* modes.c: valid BDS 5,1 coarse position */
@@ -249,6 +251,7 @@ bool rx1090_ready(double t);                         /* replies for a query at t
 void rx1090_match(struct interrog *x);               /* set answered/reply fields, queries in time order */
 void rx1090_get_stats(struct rx1090_stats *s);
 double rx1090_sync_interval(double t_now);           /* wanted s from the last 1090 window to the next */
+bool rx1090_sync_searching(double t_now);            /* no 1090 window matched yet, or overdue */
 void rx1090_hframe(const uint8_t *msg, int nbits, double t);   /* HackRF 1090-window frame at stream time t */
 void rx1090_set_geometry(double rlat, double rlon, double ralt, double xlat, double xlon, double xalt);
 

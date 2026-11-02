@@ -17,6 +17,8 @@
 #define RB_SIZE   (128u << 20)       /* 4 s of 16 MS/s int8 IQ */
 #define CHUNK     (256 * 1024)
 #define GUARD_S   0.06               /* retune settling + samples in flight in USB */
+#define SEARCH_DWELL 5.0             /* s: 1090 window with --rx1090 until a window matches dump1090 */
+#define SEARCH_GAP   10.0            /* s between such windows */
 #define ADSB_FREQ 1090e6
 
 static volatile sig_atomic_t stop;
@@ -650,8 +652,10 @@ static void usage(void)
 "                         UF11 by the II/SI code in DF11; also supplies callsigns. Mode A/C\n"
 "                         replies only with --rx1090-ac. Live HackRF only. The clock is synced by\n"
 "                         short HackRF windows on 1090 MHz (--adsb-dwell s, default 2 with\n"
-"                         --rx1090): frames heard by both radios. Every 30 s at first, doubling\n"
-"                         up to 5 min while the clock holds; with -B on the -B schedule\n"
+"                         --rx1090): frames heard by both radios. Until a window matches\n"
+"                         dump1090's frames: 5 s windows every 10 s (shorter if the main radar\n"
+"                         turns faster, so its passes are kept). Then every 30 s, doubling up\n"
+"                         to 5 min while the clock holds; with -B on the -B schedule\n"
 "      --no-1090-sync     no 1090 windows: lock the clock from replies only\n"
 "      --rx1090-ac        also Mode A/C replies: asks dump1090 for them (Beast command; dump1090\n"
 "                         decodes them while asked unless started with --no-modeac-auto) and\n"
@@ -934,6 +938,7 @@ int main(int argc, char **argv)
     double now = 0, last_main_burst = 0;
     uint64_t adsb_pos = 0;
     double adsb_last_end = -1e9;
+    double adsb_cur_dwell = opt.adsb_dwell;   /* length of the window going on */
     while (!stop) {
         size_t n = 0;
         uint64_t pos0 = 0;
@@ -1011,12 +1016,22 @@ int main(int argc, char **argv)
             ri.adsb_now = adsb_active;
             if (!adsb_active) {
                 double every = opt.rx1090 && !opt.adsb_cs ? rx1090_sync_interval(now) : opt.adsb_every;
+                /* --rx1090 and no window matched dump1090's frames yet (or the last
+                 * match is overdue): longer windows, more often, until one does.
+                 * A window still fits between two passes of the main radar */
+                double dwell = opt.adsb_dwell;
+                if (opt.rx1090 && !opt.no_sync && rx1090_sync_searching(now)) {
+                    if (every > SEARCH_GAP) every = SEARCH_GAP;
+                    double d = SEARCH_DWELL;
+                    if (rot > 0 && d > rot - 2 * GUARD_S - 1.5) d = rot - 2 * GUARD_S - 1.5;
+                    if (d > dwell) dwell = d;
+                }
                 double wait = every - (cap_t - adsb_last_end);
                 ri.adsb_next = wait > 0 ? wait : -1;
                 if (wait <= 0) {
                     bool go = true;
                     double lb = analysis_last_burst_end();
-                    double win = opt.adsb_dwell + 2 * GUARD_S;
+                    double win = dwell + 2 * GUARD_S;
                     if (rot > win + 1.0 && lb >= 0) {
                         double ph = fmod(cap_t - lb, rot);
                         go = ph > 0.02 && ph < rot - win - 0.4;   /* next beam pass well after the window */
@@ -1027,9 +1042,10 @@ int main(int argc, char **argv)
                         if (opt.adsb_gain >= 0) hw_gain(dev, gain_from_total(opt.adsb_gain));   /* aircraft, not the radar */
                         adsb_active = true;
                         adsb_pos = captured();
+                        adsb_cur_dwell = dwell;
                     }
                 }
-            } else if (captured() - adsb_pos >= (uint64_t)((opt.adsb_dwell + GUARD_S) * opt.fs) * 2) {
+            } else if (captured() - adsb_pos >= (uint64_t)((adsb_cur_dwell + GUARD_S) * opt.fs) * 2) {
                 set_mark(dev, false);
                 adsb_active = false;
                 hw_gain(dev, cur_gain);       /* apply a gain change deferred during the window */

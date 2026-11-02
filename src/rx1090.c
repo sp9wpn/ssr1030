@@ -811,8 +811,14 @@ static void sync_poll(double t_now)
  * overdue (it found too few frames) is retried soon */
 double rx1090_sync_interval(double t_now)
 {
-    if (!lock_frames || t_now - sync_t > sync_iv + 45) return SYNC_IV_MIN;
+    if (rx1090_sync_searching(t_now)) return SYNC_IV_MIN;
     return sync_iv;
+}
+
+/* no window has matched dump1090's frames yet, or the last match is overdue */
+bool rx1090_sync_searching(double t_now)
+{
+    return !lock_frames || t_now - sync_t > sync_iv + 45;
 }
 
 void rx1090_poll(double t_now)
@@ -942,7 +948,7 @@ static void keep(struct interrog *x, const struct reply *y, double d, float res_
     k->df = y->df;
     k->len = y->len;
     memcpy(k->msg, y->msg, y->len);
-    k->delay_us = (float)(d * 1e6);
+    k->delay_us = (float)((d - TURNAROUND) * 1e6);   /* shown: the extra path only (turnaround taken off) */
     k->dp = (y->df == 20 || y->df == 21) && y->addr != x->addr;
     k->res_us = res_us;
     k->req_bds = req;
@@ -1074,7 +1080,8 @@ static void keep_ac(struct interrog *x, const struct acrep *y, double p1f1, doub
     k->msg[1] = (uint8_t)y->code;
     k->ac_mode = mode;
     k->ac_addr = who;
-    k->delay_us = (float)((p1f1 + e) * 1e6);
+    k->delay_us = (float)(e * 1e6);   /* shown: the extra path only (P1-P3 and the 3 us taken off) */
+    (void)p1f1;
     k->res_us = res_us;
     k->req_bds = -1;
     k->excess_m = lock_geo ? (float)(e * C_LIGHT) : NAN;
@@ -1169,7 +1176,7 @@ static void match_ac(struct interrog *x)
             S.ac_attr++;
         }
         keep_ac(x, y, p1f1, e, mode, who, res_us);
-        if (!x->nreplies || (p1f1 + e) * 1e6 < x->reply_us) x->reply_us = (float)((p1f1 + e) * 1e6);
+        if (!x->nreplies || e * 1e6 < x->reply_us) x->reply_us = (float)(e * 1e6);
         if (x->nreplies < 255) x->nreplies++;
     }
     if (x->nreplies) { x->answered = true; S.acq_ans++; }
@@ -1237,7 +1244,7 @@ void rx1090_match(struct interrog *x)
         best->used = true;
         x->answered = true;
         x->reply_df = best->df;
-        x->reply_us = (float)(bd * 1e6);
+        x->reply_us = (float)((bd - TURNAROUND) * 1e6);
         keep(x, best, bd, x->reply_res_us, req);
         S.rc_ans++;
         if (!a) a = ac_get(x->addr, true);
@@ -1257,7 +1264,7 @@ void rx1090_match(struct interrog *x)
             if (pos && fabs(d - pd) >= geo_tol(x->t)) continue;
             if (!pos && a && x->t - a->t < AC_AGE && fabs(d - a->delay) >= ac_tol(x->t - a->t)) continue;
             y->used = true;
-            if (!x->nreplies || d * 1e6 < x->reply_us) x->reply_us = (float)(d * 1e6);
+            if (!x->nreplies || (d - TURNAROUND) * 1e6 < x->reply_us) x->reply_us = (float)((d - TURNAROUND) * 1e6);
             if (pos) {
                 if (isnan(x->reply_res_us)) x->reply_res_us = (float)((d - pd) * 1e6);
                 clock_update(x->t, d - pd);
