@@ -227,7 +227,7 @@ static void agc_clip_guard(hackrf_device *dev, struct demod *d)
     bool clip = ds && (double)dc / ds > 1e-6;
     if (clip) last_clip_seen = now_t;
     hot = clip ? hot + 1 : 0;
-    if (!opt.agc || hot < 2 || AS.ob.open || now_t - last_step < 2.0 || gain_total(cur_gain) <= 0) return;
+    if (!opt.agc || hot < 2 || analysis_burst_open() || now_t - last_step < 2.0 || gain_total(cur_gain) <= 0) return;
     char why[64];
     snprintf(why, sizeof(why), "clipping %.4f%% for %d s", 100.0 * dc / ds, hot);
     set_gain(dev, gain_from_total(gain_total(cur_gain) - 4), why);
@@ -370,8 +370,8 @@ static void build_filters(char *buf, size_t n)
         o += snprintf(buf + o, n - o, "radar %s  ", rc);
     }
     if (opt.acfg.modes_only) o += snprintf(buf + o, n - o, "Mode S only  ");
-    if (opt.acfg.ac_only) o += snprintf(buf + o, n - o, "plain A/C only  ");
-    if (opt.acfg.no_ac) o += snprintf(buf + o, n - o, "no plain A/C  ");
+    if (opt.acfg.ac_only) o += snprintf(buf + o, n - o, "legacy A/C only  ");
+    if (opt.acfg.no_ac) o += snprintf(buf + o, n - o, "no legacy A/C  ");
     if (opt.acfg.ii0_only) o += snprintf(buf + o, n - o, "II0 only  ");
     if (opt.acfg.no_ii0) o += snprintf(buf + o, n - o, "no II0  ");
     if (opt.acfg.rollcall_only) o += snprintf(buf + o, n - o, "roll-calls only  ");
@@ -429,8 +429,8 @@ static void apply_input(struct run_info *ri, char kind, char *arg)
         }
         char l[120];
         ac_list_str(&opt.acfg, true, l, sizeof(l));
-        snprintf(m, sizeof(m), "aircraft filter %s%s", l, opt.acfg.ac_only ? " (plain A/C only OFF)" : "");
-        opt.acfg.ac_only = false;                 /* plain A/C carries no address */
+        snprintf(m, sizeof(m), "aircraft filter %s%s", l, opt.acfg.ac_only ? " (legacy A/C only OFF)" : "");
+        opt.acfg.ac_only = false;                 /* legacy A/C carries no address */
         apply_filters(ri, m);
     }
 }
@@ -514,14 +514,14 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
         case 'g': case 'G': opt.agc = !opt.agc; agc_low_count = 0; manual = false; break;
         case 'S':
             opt.acfg.modes_only = !opt.acfg.modes_only;
-            if (opt.acfg.modes_only) opt.acfg.ac_only = false;   /* with plain-A/C-only nothing would pass */
+            if (opt.acfg.modes_only) opt.acfg.ac_only = false;   /* with legacy-A/C-only nothing would pass */
             apply_filters(ri, opt.acfg.modes_only ? "Mode S only ON (non-Mode S dropped)" : "Mode S only OFF");
             manual = false;
             break;
         case 'c':
             opt.acfg.no_ac = !opt.acfg.no_ac;
             if (opt.acfg.no_ac && opt.acfg.ac_only) opt.acfg.ac_only = false;   /* together nothing would pass */
-            apply_filters(ri, opt.acfg.no_ac ? "plain A/C (AA/CC) dropped" : "plain A/C (AA/CC) kept again");
+            apply_filters(ri, opt.acfg.no_ac ? "legacy A/C (AA/CC) and the legacy A/C radar dropped" : "legacy A/C (AA/CC) kept again");
             manual = false;
             break;
         case 'i':
@@ -534,12 +534,12 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
             opt.acfg.ii0_only = !opt.acfg.ii0_only;
             char m[160] = "II0 only OFF";
             if (opt.acfg.ii0_only) {
-                /* plain A/C carries no code; another radar filter or no II0 would leave nothing */
+                /* legacy A/C carries no code; another radar filter or no II0 would leave nothing */
                 bool rad = opt.acfg.radar_sel > 0;
                 int o = snprintf(m, sizeof(m), "II0 only ON");
                 if (opt.acfg.no_ii0 || opt.acfg.ac_only || rad)
                     o += snprintf(m + o, sizeof(m) - o, "; off:%s%s%s", opt.acfg.no_ii0 ? " no II0" : "",
-                                  opt.acfg.ac_only ? " plain A/C only" : "", rad ? " radar filter" : "");
+                                  opt.acfg.ac_only ? " legacy A/C only" : "", rad ? " radar filter" : "");
                 opt.acfg.no_ii0 = opt.acfg.ac_only = false;
                 if (rad) opt.acfg.radar_sel = -1;
             }
@@ -549,13 +549,13 @@ static bool handle_keys(hackrf_device *dev, struct run_info *ri)
         }
         case 'C': {
             opt.acfg.ac_only = !opt.acfg.ac_only;
-            char m[160] = "plain A/C only OFF";
+            char m[160] = "legacy A/C only OFF";
             if (opt.acfg.ac_only) {
-                /* Mode S only, roll-calls only, no plain A/C or an aircraft filter would leave nothing */
-                int o = snprintf(m, sizeof(m), "plain A/C only ON (Mode S and intermode dropped)");
+                /* Mode S only, roll-calls only, no legacy A/C or an aircraft filter would leave nothing */
+                int o = snprintf(m, sizeof(m), "legacy A/C only ON: the legacy A/C radar (Mode S and intermode dropped)");
                 if (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.no_ac || opt.acfg.nac || opt.acfg.ii0_only)
                     o += snprintf(m + o, sizeof(m) - o, "; off:%s%s%s%s%s", opt.acfg.modes_only ? " Mode S only" : "",
-                                  opt.acfg.rollcall_only ? " roll-calls only" : "", opt.acfg.no_ac ? " no plain A/C" : "",
+                                  opt.acfg.rollcall_only ? " roll-calls only" : "", opt.acfg.no_ac ? " no legacy A/C" : "",
                                   opt.acfg.nac ? " aircraft filter" : "", opt.acfg.ii0_only ? " II0 only" : "");
                 opt.acfg.modes_only = opt.acfg.rollcall_only = opt.acfg.no_ac = opt.acfg.ii0_only = false;
                 opt.acfg.nac = 0;
@@ -628,14 +628,16 @@ static void usage(void)
 "  -r, --radar CODE       keep only one radar: SI1-63 or II0-15; A/C interrogations are\n"
 "                         attributed via the beam burst or the preceding UF11, else dropped\n"
 "  -S, --modes-only       drop Mode A/C and intermode (A/C-only, A/C/S all-call) interrogations\n"
-"  -C, --ac-only          keep only plain Mode A/C (tokens AA / CC, no P4) as sent by older SSR\n"
-"                         radars; drops Mode S and all intermode all-calls (not with -S, -R, -A, -c)\n"
-"  -c, --no-plain-ac      drop plain Mode A/C (tokens AA / CC, no P4); keeps Mode S and intermode\n"
+"  -C, --ac-only          keep only legacy Mode A/C (tokens AA / CC, no P4) as sent by older SSR\n"
+"                         radars; drops Mode S and all intermode all-calls (not with -S, -R, -A, -c).\n"
+"                         A radar filter too: only the legacy A/C radar's bursts\n"
+"  -c, --no-legacy-ac     drop legacy Mode A/C (tokens AA / CC, no P4) and the legacy A/C radar's\n"
+"                         bursts; keeps Mode S and intermode\n"
 "  -I, --ii0-only         keep only II0 queries: UF11 with II 0, and roll-calls with IIS 0 that\n"
 "                         are not part of another radar's burst (SI radars send IIS 0 too)\n"
 "  -i, --no-ii0           drop those II0 queries\n"
 "  -R, --rollcall-only    keep only interrogations addressed to an aircraft (UF4/5/20/21/24/19):\n"
-"                         drops UF11 and A/C/intermode all-calls and plain Mode A/C\n"
+"                         drops UF11 and A/C/intermode all-calls and legacy Mode A/C\n"
 "  -A, --aircraft LIST    keep only interrogations addressed to these aircraft: up to 16 hex\n"
 "                         addresses (48af01) or callsigns (LOT3KM; needs --adsb/--adsblol),\n"
 "                         separated by commas or spaces: -A 48af01,LOT3KM,DLH123\n"
@@ -702,8 +704,8 @@ static void usage(void)
 "  -h, --help             this text\n\n"
 "Keys (dashboard): q quit, +/- VGA, L/l LNA, p RF amp (any of these: manual gain), g auto gain,\n"
 "                  r radar filter, a aircraft filter (type it, Enter; empty clears),\n"
-"                  S Mode S only on/off, R roll-calls only on/off, c plain A/C (AA/CC) off/on,\n"
-"                  C plain A/C only on/off (turns off S, R, c and the aircraft filter),\n"
+"                  S Mode S only on/off, R roll-calls only on/off, c legacy A/C (AA/CC) off/on,\n"
+"                  C legacy A/C only on/off (turns off S, R, c and the aircraft filter),\n"
 "                  b burst graph, space freeze screen,\n"
 "                  x reset statistics\n"
 "                  With --rx1090: F autofreeze (freeze on the first burst with matched replies and\n"
@@ -721,7 +723,7 @@ int main(int argc, char **argv)
         { "member-db", 1, 0, 8 }, { "core-db", 1, 0, 9 }, { "log", 1, 0, 'o' }, { "space", 0, 0, 10 },
         { "list", 0, 0, 'L' }, { "tcas", 0, 0, 11 }, { "dashboard", 0, 0, 'd' }, { "quiet", 0, 0, 'q' },
         { "radar", 1, 0, 'r' }, { "modes-only", 0, 0, 'S' }, { "aircraft", 1, 0, 'A' },
-        { "rollcall-only", 0, 0, 'R' }, { "ac-only", 0, 0, 'C' }, { "no-plain-ac", 0, 0, 'c' },
+        { "rollcall-only", 0, 0, 'R' }, { "ac-only", 0, 0, 'C' }, { "no-legacy-ac", 0, 0, 'c' }, { "no-plain-ac", 0, 0, 'c' },
         { "ii0-only", 0, 0, 'I' }, { "no-ii0", 0, 0, 'i' },
         { "adsb", 0, 0, 'B' }, { "adsb-every", 1, 0, 12 }, { "adsb-dwell", 1, 0, 13 },
         { "adsb-db", 1, 0, 14 }, { "adsblol", 1, 0, 15 }, { "adsblol-radius", 1, 0, 16 },
@@ -808,7 +810,7 @@ int main(int argc, char **argv)
     }
     if (opt.fs < 8e6) { fprintf(stderr, "sample rate must be >= 8e6 for Mode S DPSK\n"); return 1; }
     if (opt.acfg.ac_only && (opt.acfg.modes_only || opt.acfg.rollcall_only || opt.acfg.nac || opt.acfg.no_ac)) {
-        fprintf(stderr, "-C (plain A/C only) cannot be combined with -S, -R, -A or -c: nothing would pass\n");
+        fprintf(stderr, "-C (legacy A/C only) cannot be combined with -S, -R, -A or -c: nothing would pass\n");
         return 1;
     }
     if (opt.acfg.ii0_only && (opt.acfg.no_ii0 || opt.acfg.ac_only || opt.acfg.radar_sel > 0)) {

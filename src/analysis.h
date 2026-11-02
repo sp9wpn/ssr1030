@@ -10,10 +10,16 @@
 #define ADDR_HASH    8192
 #define RECENT_N     8
 #define NCODES       80          /* radar codes: II 0-15, SI 16+1..63 */
-#define CODE_PLAIN_AC (-3)       /* burst of a plain Mode A/C radar (no II/SI code seen) */
+#define CODE_LEGACY_AC (-3)       /* burst of a legacy Mode A/C radar (no II/SI code seen) */
 #define NO_TARGET    255
 #define NO_ADDR      0xFFFFFFFFu
 #define TR_N         1024        /* distinct token transitions tracked */
+/* burst detectors running side by side: legacy Mode A/C queries (no P4) come
+ * from a legacy A/C radar, everything else from a Mode S radar (which sends
+ * A/C-only all-calls instead), so the two radars' beams are told apart even
+ * when they overlap in time */
+enum { CLS_S, CLS_AC, NCLS };
+int query_class(int kind);
 
 /* query-type groups used in per-burst tables; every interrogation is in exactly one */
 enum group { G_AC, G_ACONLY, G_ACS, G_SALL, G_SALT, G_SSQK, G_CAL, G_SETALT, G_TRK, G_HDGSPD, G_OBDS,
@@ -70,7 +76,7 @@ struct open_burst {
     int n_raw;
     int votes[NCODES];
     int iis0;                   /* roll-calls with IIS 0: II0 only when no code was seen */
-    int plain;                  /* plain Mode A/C queries (no code) */
+    int plain;                  /* legacy Mode A/C queries (no code) */
     bool partial;
 };
 
@@ -105,14 +111,15 @@ struct analysis_state {
     struct analysis_cfg cfg;
     double now;
     double floor_db;           /* detection threshold dBFS (empty-bin value) */
-    float bg_db;               /* background (sidelobe) level */
+    float bg_db;               /* background (sidelobe) level of Mode S / intermode queries */
+    float bg_ac;               /* ... of legacy Mode A/C queries (a weaker A/C radar has its own) */
 
     long total[K_COUNT], inbeam[K_COUNT], side[K_COUNT];
     long tcas_total, tcas_uf0, tcas_uf16, tcas_ws;
     long n_all, n_pass;
     long filt_radar, filt_modes, filt_ac, filt_noac, filt_rollcall, filt_aircraft, filt_ii0;
 
-    struct open_burst ob;
+    struct open_burst ob[NCLS];
     struct burst hist[BURST_HIST];
     int nhist;                  /* total committed bursts */
     double last_burst_end;
@@ -121,7 +128,7 @@ struct analysis_state {
 
     struct trans tr[TR_N];      /* in-beam token -> token transitions */
     int ntr;
-    int prev_tok, prev_burst; double prev_t;
+    int prev_tok[NCLS], prev_burst[NCLS]; double prev_t[NCLS];
 
     long uf11_code[2][64][16];  /* [is_si][code][pr] */
     long bds[256], bds_inbeam[256], bds_side[256];
@@ -147,7 +154,8 @@ int analysis_top_transitions(struct trans *out, int max);
 void burst_ranks(const struct burst *b, int *rank);          /* alphabetical target numbers, 1-based */
 int burst_item(const struct burst *b, int s, const int *rank, char *out, size_t n);  /* run at s -> next */
 void burst_targets(const struct burst *b, const int *rank, char *out, size_t n);   /* "1/DLH123 2/..." */
-const struct burst *analysis_graph_burst(void);   /* latest burst of the main radar, else latest */
+const struct burst *analysis_graph_burst(void);   /* latest burst with queries after the filters, else latest */
+bool analysis_burst_open(void);                   /* a burst of either detector is open */
 
 /* rows of the interrogation table: Mode S UF4/UF5 split by the reply they ask for
    (RR >= 16: Comm-B, DF20/DF21), UF19/20/21/24 and unknown formats in one "UF other" row.

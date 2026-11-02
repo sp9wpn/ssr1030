@@ -6,7 +6,7 @@ It is based on [dump1030](https://github.com/Fuziih/dump1030).
 ## Features
 
 - **Full Mode S uplink decoding** at 16 MS/s: UF4/5/11/20/21/24, aircraft address, II/SI code and the requested Comm-B register (BDS).
-- **Mode A/C and intermode:** plain Mode A/C, A/C-only and A/C/S all-calls; P2/P5 sidelobe suppression is measured for every query.
+- **Mode A/C and intermode:** legacy Mode A/C, A/C-only and A/C/S all-calls; P2/P5 sidelobe suppression is measured for every query.
 - **Radar analysis:** main-beam bursts, rotation period, dwell time, interrogation sequence within the beam, several radars told apart by their codes.
 - **Sidelobe detection:** Interrogations marked as sidelobes locally using P2/P5 pulses (note: aircraft might interprete them differently)
 - **Callsigns:** from short ADS-B windows on 1090 MHz, from [adsb.lol](https://adsb.lol), or from dump1090.
@@ -44,7 +44,7 @@ make bds_logger                    # bds_logger only (no libhackrf needed)
 ./ssr1030 -r SI37 -S               # only radar SI37, Mode S interrogations only
 ./ssr1030 -B                       # learn callsigns from ADS-B (1090) windows (kept in memory)
 ./ssr1030 -r SI37 -R               # only roll-calls of SI37 (no all-calls)
-./ssr1030 -C                       # only plain Mode A/C (older SSR radars)
+./ssr1030 -C                       # only legacy Mode A/C (older SSR radars)
 ./ssr1030 -A 48af01                # only interrogations addressed to one aircraft
 ./ssr1030 -A 48af01,LOT3KM,DLH123  # ... or to any of several
 ./ssr1030 -A LOT3KM -B             # same, by callsign
@@ -55,24 +55,24 @@ make bds_logger                    # bds_logger only (no libhackrf needed)
 
 These apply to statistics, the log, `--list` and what the bursts show. TCAS stays a separate statistic.
 
-Burst detection itself is not filtered: bursts are found from all interrogations, so their timing, dwell and the radar's rotation stay the same under any filter. The type and aircraft filters only thin out each burst's counts, sequence and chart (a burst can show `n=0`); the burst chart picks the newest burst of the main radar that still shows something. Only `-r` leaves out whole bursts of other radars.
+Burst detection itself is not filtered: bursts are found from all interrogations, so their timing, dwell and the radar's rotation stay the same under any filter. The type and aircraft filters only thin out each burst's counts, sequence and chart (a burst can show `n=0`); the burst chart picks the newest burst that still shows something, of any radar. The radar filters leave out whole bursts of other radars: `-r` (that radar), `-C` (only the legacy A/C radar), `-c` and `-S` (not the legacy A/C radar).
 
 - `-r, --radar SI37|II3`: keeps one radar.
   - Mode S interrogations carry the code: UF11 has II/SI, and UF4/5/20/21 have SIS (DI=3) or IIS (DI=0/1/7).
   - IIS=0 is not proof of II0: SI-code radars send IIS=0 too, and their SI code only in UF11 and DI=3 roll-calls. So a roll-call with IIS=0 takes its burst's code, and a burst is named II0 only when IIS=0 roll-calls are all it has (for example an airport multilateration interrogator).
   - All-call interrogations are attributed through the main-beam burst they belong to.
-  - A burst is named by the II/SI code sent most often by the queries inside it; on a draw an SI code wins over an II code. Plain Mode A/C is not counted.
-  - With no II/SI code inside: II0 when it has roll-calls with IIS=0, else `A/C` (a plain Mode A/C radar) when it has plain Mode A/C queries, else `?` (for example only A/C-only all-calls, which come from a Mode S radar).
-  - Plain Mode A/C (no P4) is never part of a burst that has a Mode S code, and is never attributed to it: a Mode S radar sends A/C-only all-calls instead, so plain A/C comes from another radar.
+  - A burst is named by the II/SI code sent most often by the queries inside it; on a draw an SI code wins over an II code. Legacy Mode A/C is not counted.
+  - With no II/SI code inside: II0 when it has roll-calls with IIS=0, else `A/C` (a legacy Mode A/C radar) when it has legacy Mode A/C queries, else `?` (for example only A/C-only all-calls, which come from a Mode S radar).
+  - Legacy Mode A/C (no P4) comes from a legacy A/C radar: a Mode S radar sends A/C-only all-calls (short P4) instead. Legacy A/C therefore has its own burst detector (see **Bursts**), its bursts are named `A/C`, and it never appears in a Mode S radar's burst or burst chart.
   - Outside bursts, an all-call is attributed if a UF11 was sent less than 300 µs before it.
   - Anything left unattributed is dropped.
   - The burst list, radar table and burst chart show only bursts with that radar's code. Another radar's burst can contain a query of the filtered radar heard in between; that query still counts in the statistics.
-- `-S, --modes-only`: drops plain Mode A/C and intermode (A/C-only and A/C/S all-calls).
-- `-C, --ac-only`: keeps only plain Mode A/C (tokens `AA`/`CC`, no P4), as sent by older SSR radars. It drops Mode S and all intermode all-calls (`A`/`C`, `As`/`Cs`). It cannot be combined with `-S`, `-R`, `-A` or `-c`. The key `C` toggles it at run time.
-- `-c, --no-plain-ac`: drops plain Mode A/C (tokens `AA`/`CC`, no P4). Mode S and intermode all-calls stay. The key `c` toggles it at run time.
+- `-S, --modes-only`: drops legacy Mode A/C and intermode (A/C-only and A/C/S all-calls).
+- `-C, --ac-only`: keeps only legacy Mode A/C (tokens `AA`/`CC`, no P4), as sent by older SSR radars. It drops Mode S and all intermode all-calls (`A`/`C`, `As`/`Cs`). It is a radar filter too: only the legacy A/C radar's bursts are kept. It cannot be combined with `-S`, `-R`, `-A` or `-c`. The key `C` toggles it at run time.
+- `-c, --no-legacy-ac`: drops legacy Mode A/C (tokens `AA`/`CC`, no P4) and the legacy A/C radar's bursts. Mode S and intermode all-calls stay. The key `c` toggles it at run time.
 - `-I, --ii0-only`: keeps only II0 queries: UF11 with II=0, and roll-calls with IIS=0 that are not part of another radar's burst (SI radars send IIS=0 too, so inside an SI55 burst they count as SI55). Useful for interrogators such as airport multilateration. It cannot be combined with `-i`, `-C` or a radar filter other than `II0`. The key `I` toggles it at run time.
 - `-i, --no-ii0`: drops those II0 queries. The key `i` toggles it at run time.
-- `-R, --rollcall-only`: keeps only interrogations addressed to an aircraft (UF4/5/20/21/24/19). It drops UF11 `S`, all intermode all-calls and plain Mode A/C.
+- `-R, --rollcall-only`: keeps only interrogations addressed to an aircraft (UF4/5/20/21/24/19). It drops UF11 `S`, all intermode all-calls and legacy Mode A/C.
 - `-A, --aircraft LIST`: keeps only interrogations addressed to the listed aircraft (UF0/4/5/16/19/20/21/24).
   - `LIST` holds up to 16 entries separated by commas, spaces or semicolons, for example `-A 48af01,LOT3KM,DLH123`.
   - Each entry is 6 hex digits or a callsign. Use `cs:` to force a callsign that looks like hex.
@@ -192,8 +192,8 @@ Dashboard keys:
 | `a` | Aircraft filter: type hex addresses or callsigns (list separated by commas or spaces), then `Enter` |
 | `S` | Mode S only on/off (same as `-S`) |
 | `R` | Roll-calls only on/off (same as `-R`) |
-| `c` | Plain Mode A/C (`AA`/`CC`) off/on (same as `-c`). Turning it off also ends `-C` |
-| `C` | Plain Mode A/C only on/off (same as `-C`). Turning it on also ends `-S`, `-R`, `-c` and the aircraft filter, which would leave nothing; `S`, `R` or an aircraft filter end it |
+| `c` | Legacy Mode A/C (`AA`/`CC`) off/on (same as `-c`). Turning it off also ends `-C` |
+| `C` | Legacy Mode A/C only on/off (same as `-C`). Turning it on also ends `-S`, `-R`, `-c` and the aircraft filter, which would leave nothing; `S`, `R` or an aircraft filter end it |
 | `i` | II0 queries off/on (same as `-i`). Turning it off also ends `-I` |
 | `I` | II0 queries only on/off (same as `-I`). Turning it on also ends `-i`, `-C` and a radar filter other than `II0`; setting another radar filter ends it |
 | `b` | Burst graph screen on/off (see below) |
@@ -301,7 +301,7 @@ Data phase reversals start at sync + 0.5 µs (N ≥ 2 chips, Annex 10 Vol IV 3.1
 
 ## Burst graph (`b`)
 
-`b` switches the whole screen to the latest beam pass of the main radar, one row per query in time order:
+`b` switches the whole screen to the latest beam pass of any radar (with `-r` or `-C`, of that radar), one row per query in time order:
 
 ```
    -262.58 ms  -19.50°  AA                               -18.5 ░░░░░░░           P2
@@ -342,12 +342,14 @@ They are left out of all radar analysis.
 
 ## Bursts (antenna main beam)
 
-- **Background:** the median of the strongest radar interrogation in each 10 ms bin, over the last 20 s. This approximates the sidelobe level.
+- **Two detectors:** legacy Mode A/C queries (no P4) and all others (Mode S, intermode) form bursts separately, each with its own background. A legacy A/C radar and a Mode S radar are thus told apart even when their beams pass at the same time, and a weaker A/C radar is measured against its own background, not the Mode S radar's sidelobes. Their bursts may overlap in time.
+- **Background:** the median of the strongest interrogation of the detector's kind in each 10 ms bin, over the last 20 s. This approximates the sidelobe level. The dashboard shows the legacy A/C one in brackets once it is above the detection threshold.
 - **Burst:** a run of interrogations ≥ `--member-db` (3 dB) above background, with gaps < `--burst-gap` (30 ms). It must contain at least one interrogation ≥ `--core-db` (6 dB) above background.
+- **Burst chart contents:** a burst's chart shows its own queries and, around them, only non-beam queries that can belong to its radar: legacy A/C with a legacy A/C radar's burst, everything else with a Mode S radar's burst, and never a query attributed to another radar.
 - **Radar identity:** taken from the UF11 II/SI code in the burst, or from SIS.
 - **Per radar:** rotation period (median time between burst peaks), dwell time, and interrogations per burst by query type (avg/min/max).
 - **Burst table columns** (each interrogation counted once, so they add up to `n`):
-  - `AA/CC`, `A/C`, `ACSall`: plain Mode A/C, A/C-only all-calls, A/C/S all-calls.
+  - `AA/CC`, `A/C`, `ACSall`: legacy Mode A/C, A/C-only all-calls, A/C/S all-calls.
   - `UF11-all`: UF11 all-calls (token `S` in sequences).
   - `UF4`, `UF5` (`alt`, `sqk` with `--human`): UF4 and UF5 roll-calls without a Comm-B request.
   - `b20`, `b40`, `b50`, `b60` (`acid`, `selAlt`, `trk`, `hdgSpd` with `--human`): Comm-B requests for BDS 2,0, 4,0, 5,0 and 6,0, whatever the format (UF4/5/20/21).
@@ -359,7 +361,7 @@ They are left out of all radar analysis.
 
 | Token | Meaning |
 |---|---|
-| `AA` `CC` | Plain Mode A / Mode C (no P4) |
+| `AA` `CC` | Legacy Mode A / Mode C (no P4) |
 | `A` `C` | A/C-only all-call (short P4) |
 | `As` `Cs` | A/C/S all-call (long P4) |
 | `S` | UF11 Mode S all-call (acquisition) |
