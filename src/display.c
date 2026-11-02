@@ -491,7 +491,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
         char fl[360];
         int o = snprintf(fl, sizeof(fl), "Filters: %s", ri->filters[0] ? ri->filters : "none");
         if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_noac || AS.filt_rollcall || AS.filt_aircraft || AS.filt_ii0)
-            snprintf(fl + o, sizeof(fl) - o, "  (dropped: radar %ld, non-S %ld, not plain A/C %ld, plain A/C %ld, all-call %ld, aircraft %ld, II0 %ld)",
+            snprintf(fl + o, sizeof(fl) - o, "  (dropped: radar %ld, non-S %ld, not legacy A/C %ld, legacy A/C %ld, all-call %ld, aircraft %ld, II0 %ld)",
                      AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_noac, AS.filt_rollcall, AS.filt_aircraft, AS.filt_ii0);
         printf("%s", fl);
         if (ri->adsb) {
@@ -531,9 +531,11 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     double util = util_pct(&st, now);
     char ut[32] = "-";
     if (!isnan(util)) snprintf(ut, sizeof(ut), "%.2f%%", util);
-    printf("Background (sidelobe) %.1f dBFS   beam member >= %.1f   core >= %.1f   1030 busy %s (60 s)   TCAS/ACAS (excluded): "
+    char bgac[48] = "";
+    if (AS.bg_ac > AS.floor_db + 0.05) snprintf(bgac, sizeof(bgac), " (legacy A/C %.1f)", AS.bg_ac);
+    printf("Background (sidelobe) %.1f dBFS%s   beam member >= %.1f   core >= %.1f   1030 busy %s (60 s)   TCAS/ACAS (excluded): "
            GRN "%ld" R " (UF0 %ld, UF16 %ld, WS %ld; %d aircraft)" EL,
-           AS.bg_db, AS.bg_db + AS.cfg.member_db, AS.bg_db + AS.cfg.core_db, ut,
+           AS.bg_db, bgac, AS.bg_db + AS.cfg.member_db, AS.bg_db + AS.cfg.core_db, ut,
            AS.tcas_total, AS.tcas_uf0, AS.tcas_uf16, AS.tcas_ws, AS.naddr_tcas);
     fputs(EL, stdout);
 
@@ -623,7 +625,7 @@ void display_render(const struct run_info *ri, double now, struct demod *d, uint
     if (AS.nhist > 0) {
         struct burst *b = &AS.hist[(AS.nhist - 1) % BURST_HIST];
         printf(B "Last burst #%d sequence" R DIM
-               "  (A C A/C-only all-call, AA CC plain A/C, S UF11 all-call, %s, %s, S-msg Comm-A, xN repeat)" R EL,
+               "  (A C A/C-only all-call, AA CC legacy A/C, S UF11 all-call, %s, %s, S-msg Comm-A, xN repeat)" R EL,
                b->id, bds_human ? "alt/sqk UF4/5" : "UF4/UF5 roll-call", bds_human ? "acid/selAlt/trk/hdgSpd BDS 2,0/4,0/5,0/6,0" : "UF4b50 UF4 asking BDS 5,0");
         print_seq(b, cols, 4);
     } else fputs(EL EL EL, stdout);

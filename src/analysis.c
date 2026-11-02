@@ -34,7 +34,7 @@ static struct interrog pend[PENDING];
 static uint64_t ph, pt;                 /* head (write), tail (oldest) */
 static struct interrog outq[OUTQ];
 static uint64_t oh, ot;
-static float bins[NBINS];
+static float bins[NCLS][NBINS];         /* strongest query per 10 ms, per detector */
 static long cur_bin = -1;
 static int nbins_filled, bins_since_bg;
 static int next_burst_id;
@@ -108,13 +108,18 @@ double median_d(const double *v, int n)
     return (n & 1) ? t[n / 2] : 0.5 * (t[n / 2 - 1] + t[n / 2]);
 }
 
+int query_class(int kind) { return kind <= K_MODED ? CLS_AC : CLS_S; }
+
+static void pending_clear(void);
+
 void analysis_init(const struct analysis_cfg *cfg)
 {
     memset(&AS, 0, sizeof(AS));
     AS.cfg = *cfg;
     AS.floor_db = -20;
-    AS.bg_db = -20;
-    AS.prev_tok = -1;
+    AS.bg_db = AS.bg_ac = -20;
+    for (int c = 0; c < NCLS; c++) AS.prev_tok[c] = -1;
+    pending_clear();
     AS.last_burst_end = -1;
     AS.gap_end = -1e9;
     for (int k = 0; k < AC_MAX; k++) AS.tgt[k] = k < cfg->nac ? cfg->ac[k].addr : -1;
@@ -131,13 +136,15 @@ static void bins_advance(long b)
     if (cur_bin < 0) cur_bin = b - 1;
     while (cur_bin < b) {
         cur_bin++;
-        bins[cur_bin % NBINS] = (float)AS.floor_db;
+        for (int c = 0; c < NCLS; c++) bins[c][cur_bin % NBINS] = (float)AS.floor_db;
         if (nbins_filled < NBINS) nbins_filled++;
         if (++bins_since_bg >= 50) {
             static float tmp[NBINS];
-            for (int k = 0; k < nbins_filled; k++) tmp[k] = bins[(cur_bin - k) % NBINS];
-            qsort(tmp, nbins_filled, sizeof(float), cmpfl);
-            AS.bg_db = tmp[nbins_filled / 2];
+            for (int c = 0; c < NCLS; c++) {
+                for (int k = 0; k < nbins_filled; k++) tmp[k] = bins[c][(cur_bin - k) % NBINS];
+                qsort(tmp, nbins_filled, sizeof(float), cmpfl);
+                *(c == CLS_AC ? &AS.bg_ac : &AS.bg_db) = tmp[nbins_filled / 2];
+            }
             bins_since_bg = 0;
         }
     }
@@ -149,7 +156,7 @@ void analysis_add(struct interrog *it)
         long b = (long)(it->t / BIN_S);
         if (b >= cur_bin) {
             bins_advance(b);
-            float *v = &bins[b % NBINS];
+            float *v = &bins[query_class(it->kind)][b % NBINS];
             if (it->amp_db > *v) *v = it->amp_db;
         }
     }
@@ -173,8 +180,8 @@ static struct radar *radar_get(int code)
     return r;
 }
 
-/* a radar identified by its queries: II/SI code, or a plain Mode A/C radar */
-static bool known_code(int code) { return code >= 0 || code == CODE_PLAIN_AC; }
+/* a radar identified by its queries: II/SI code, or a legacy Mode A/C radar */
+static bool known_code(int code) { return code >= 0 || code == CODE_LEGACY_AC; }
 
 double analysis_rotation(void)
 {
@@ -217,8 +224,9 @@ void analysis_set_gain(float g) { AS.gain_db = g; }
 
 void analysis_gain_shift(float delta)
 {
-    for (int k = 0; k < NBINS; k++) bins[k] += delta;
+    for (int c = 0; c < NCLS; c++) for (int k = 0; k < NBINS; k++) bins[c][k] += delta;
     AS.bg_db += delta;
+    AS.bg_ac += delta;
 }
 
 /* ---------------- filters ---------------- */
@@ -347,7 +355,7 @@ static void attribute(struct interrog *x, int burst_code)
 {
     int own = modes_own_code(x);
     if (own >= 0) x->radar = own;
-    else if (x->burst >= 0 && burst_code >= 0) x->radar = burst_code;
+    else if (x->burst >= 0 && known_code(burst_code)) x->radar = burst_code;
     else if (x->kind != K_UF11 && kind_is_allcall(x->kind) && last11_t >= 0 && x->t - last11_t < PAIR_S)
         x->radar = last11_code;
     else x->radar = -1;
@@ -407,20 +415,20 @@ static bool stage2(struct interrog *x, int burst_code)
     if (x->burst >= 0) AS.inbeam[k]++;
     if (x->sidelobe) AS.side[k]++;
 
-    if (x->burst >= 0) {
-        int tok = seq_token(x);
-        if (AS.prev_tok >= 0 && AS.prev_burst == x->burst) {
-            struct trans *t = trans_get((uint16_t)AS.prev_tok, (uint16_t)tok);
+    if (x->burst >= 0) {            /* transitions within a burst; the two detectors' bursts interleave */
+        int tok = seq_token(x), c = query_class(k);
+        if (AS.prev_tok[c] >= 0 && AS.prev_burst[c] == x->burst) {
+            struct trans *t = trans_get((uint16_t)AS.prev_tok[c], (uint16_t)tok);
             if (t) {
-                double dt = x->t - AS.prev_t;
+                double dt = x->t - AS.prev_t[c];
                 t->n++; t->sum += dt;
                 if (dt < t->min) t->min = dt;
                 if (dt > t->max) t->max = dt;
             }
         }
-        AS.prev_tok = tok;
-        AS.prev_t = x->t;
-        AS.prev_burst = x->burst;
+        AS.prev_tok[c] = tok;
+        AS.prev_t[c] = x->t;
+        AS.prev_burst[c] = x->burst;
     }
 
     if (k == K_UF11) {
@@ -452,13 +460,14 @@ static bool stage2(struct interrog *x, int burst_code)
 
 /* ---------------- bursts (stage 1) ---------------- */
 
+static float bg_of(const struct interrog *x) { return query_class(x->kind) == CLS_AC ? AS.bg_ac : AS.bg_db; }
 static bool is_member(const struct interrog *x)
 {
-    return !x->tcas && !x->sidelobe && x->amp_db >= AS.bg_db + AS.cfg.member_db;
+    return !x->tcas && !x->sidelobe && x->amp_db >= bg_of(x) + AS.cfg.member_db;
 }
 static bool is_core(const struct interrog *x)
 {
-    return is_member(x) && x->amp_db >= AS.bg_db + AS.cfg.core_db;
+    return is_member(x) && x->amp_db >= bg_of(x) + AS.cfg.core_db;
 }
 
 /* burst span and peak from every member: the filters must not change where
@@ -561,7 +570,17 @@ static void graph_add(struct burst *b, const struct interrog *y, int cls, int ka
 #define NPOST 8
 static struct {
     double t; float amp, p2, p5, sq; float noise; uint32_t addr; uint16_t tok; uint8_t cls; bool ans; uint8_t rep_n; int8_t code; uint64_t rep_idx;
+    uint8_t qc; int8_t radar;   /* query_class, attributed radar */
 } gring[GRING];
+
+/* a non-beam query may appear in the graph of a burst of radar `code`: plain
+ * A/C only with a legacy A/C radar and vice versa, and never one attributed
+ * to another radar */
+static bool graph_fits(int code, int qc, int radar)
+{
+    if ((code == CODE_LEGACY_AC) != (qc == CLS_AC)) return false;
+    return !known_code(radar) || radar == code;
+}
 static uint64_t gring_n;
 static struct { int idx; double until_side, until_weak; } posts[NPOST];
 static int nposts;
@@ -571,9 +590,11 @@ static void graph_note(const struct interrog *y)
     if (y->burst >= 0 || !graph_extra_ok(y)) return;
     int cls = y->sidelobe ? GP_SIDE : GP_WEAK;
     uint16_t tok = seq_token(y);
+    int qc = query_class(y->kind);
     for (int p = 0; p < nposts; p++) {
         double until = cls == GP_SIDE ? posts[p].until_side : posts[p].until_weak;
-        if (y->t <= until && AS.nhist - posts[p].idx <= BURST_HIST)
+        if (y->t <= until && AS.nhist - posts[p].idx <= BURST_HIST &&
+            graph_fits(AS.hist[posts[p].idx % BURST_HIST].code, qc, y->radar))
             graph_put(&AS.hist[posts[p].idx % BURST_HIST], y->t, y->amp_db, abs_p2(y), abs_p5(y), y->sls_floor_db, y->noise_db, gaddr(y), tok,
                       NO_TARGET, cls, y->answered, y->rep_idx, y->rep_n, radio_code(y));
     }
@@ -581,6 +602,7 @@ static void graph_note(const struct interrog *y)
     gring[i].t = y->t; gring[i].amp = y->amp_db; gring[i].tok = tok; gring[i].cls = (uint8_t)cls;
     gring[i].p2 = abs_p2(y); gring[i].p5 = abs_p5(y); gring[i].sq = y->sls_floor_db; gring[i].noise = y->noise_db; gring[i].addr = gaddr(y); gring[i].ans = y->answered;
     gring[i].rep_idx = y->rep_idx; gring[i].rep_n = y->rep_n; gring[i].code = (int8_t)radio_code(y);
+    gring[i].qc = (uint8_t)qc; gring[i].radar = (int8_t)y->radar;
 }
 
 static int cmp_gp(const void *x, const void *y)
@@ -608,7 +630,7 @@ static void graph_context(struct burst *b, double t0, double t1, double margin, 
         int i = k % GRING;
         double lo = gring[i].cls == GP_SIDE ? t0 - half : t0 - margin;
         double hi = gring[i].cls == GP_SIDE ? t1 + half : t1 + margin;
-        if (gring[i].t < lo || gring[i].t > hi) continue;
+        if (gring[i].t < lo || gring[i].t > hi || !graph_fits(b->code, gring[i].qc, gring[i].radar)) continue;
         graph_put(b, gring[i].t, gring[i].amp, gring[i].p2, gring[i].p5, gring[i].sq, gring[i].noise, gring[i].addr, gring[i].tok, NO_TARGET,
                   gring[i].cls, gring[i].ans, gring[i].rep_idx, gring[i].rep_n, gring[i].code);
     }
@@ -652,16 +674,12 @@ bool krow_shown(const struct krow *r, long tot, long all)
 const struct burst *analysis_graph_burst(void)
 {
     if (!AS.nhist) return NULL;
-    int code = analysis_main_code();
     int lim = AS.nhist < BURST_HIST ? AS.nhist : BURST_HIST;
-    /* the newest burst of the main radar that shows something after the filters */
+    /* the newest burst that shows something after the filters, of any radar
+     * (the radar filters, -r and -C, commit only their radar's bursts) */
     for (int i = 0; i < lim; i++) {
         const struct burst *b = &AS.hist[(AS.nhist - 1 - i) % BURST_HIST];
-        if (b->code == code && b->n > 0) return b;
-    }
-    for (int i = 0; i < lim; i++) {
-        const struct burst *b = &AS.hist[(AS.nhist - 1 - i) % BURST_HIST];
-        if (b->code == code) return b;
+        if (b->n > 0) return b;
     }
     return &AS.hist[(AS.nhist - 1) % BURST_HIST];
 }
@@ -747,75 +765,130 @@ void burst_targets(const struct burst *b, const int *rank, char *out, size_t n)
         o += snprintf(out + o, n - o, "%s%d/%s", r ? " " : "", r + 1, ac_name(b->addrs[byrank[r]]));
 }
 
-/* drain the output queue through stage 2; members of burst `id` are
- * collected into rec when valid */
-static void drain(int id, int code, bool valid, struct burst *rec)
+/* A burst is kept only when its radar passes the radar filters: -r (that
+ * radar), -C (legacy A/C only: the legacy A/C radar), -c and -S (no legacy A/C:
+ * not the legacy A/C radar). Another radar's burst can hold a query that
+ * passed them (a UF11 of the filtered radar heard in between, or an
+ * all-call paired with one), but the burst is not that radar's. The type and
+ * aircraft filters only thin out what a burst shows (rec.n may be 0). */
+static bool burst_code_ok(int code)
 {
-    while (ot < oh) {
-        struct interrog *y = &outq[ot++ % OUTQ];
-        bool member = id >= 0 && y->burst == id;
-        /* plain A/C (no P4) never comes from a Mode S radar: those send A/C-only
-         * all-calls instead, so a plain A/C query in a coded burst is another radar */
-        if (member && (!valid || (code >= 0 && y->kind <= K_MODED))) { y->burst = -1; member = false; }
-        bool pass = stage2(y, member ? code : -1);
-        if (!valid || !rec) continue;
-        if (member) rec_span(rec, y);
-        if (pass && member) {
-            int ka = rec_add(rec, y);
-            graph_add(rec, y, GP_BEAM, ka);
-        }
-    }
+    if (AS.cfg.radar_sel >= 0 && code != AS.cfg.radar_sel) return false;
+    if (AS.cfg.ac_only && code != CODE_LEGACY_AC) return false;
+    if ((AS.cfg.no_ac || AS.cfg.modes_only) && code == CODE_LEGACY_AC) return false;
+    return true;
 }
 
-static void close_burst(void)
+/* Queries wait in outq while a burst may still claim them: stage 2 needs the
+ * burst's radar. A closed burst waits here until its last member has gone
+ * through stage 2 (the other detector's open burst can hold the queue). */
+#define NPB 16
+static struct pendb {
+    bool used;
+    int code;
+    bool valid;
+    struct open_burst ob;
+    struct burst rec;
+} pb[NPB];
+
+static void pending_clear(void) { for (int i = 0; i < NPB; i++) pb[i].used = false; }
+
+static struct pendb *pb_find(int id)
 {
-    struct open_burst *o = &AS.ob;
+    for (int i = 0; i < NPB; i++) if (pb[i].used && pb[i].ob.id == id) return &pb[i];
+    return NULL;
+}
+
+static bool burst_still_open(int id)
+{
+    for (int c = 0; c < NCLS; c++) if (AS.ob[c].open && AS.ob[c].id == id) return true;
+    return false;
+}
+
+bool analysis_burst_open(void) { return AS.ob[CLS_S].open || AS.ob[CLS_AC].open; }
+
+/* all members of a closed burst went through stage 2: commit it */
+static void finish(struct pendb *p)
+{
+    struct open_burst *o = &p->ob;
+    p->used = false;
+    if (p->valid && burst_code_ok(p->code)) AS.last_burst_end = o->t1;
+    if (!p->valid || p->rec.nall == 0 || !burst_code_ok(p->code)) return;
+    struct burst *rec = &p->rec;
+    double margin = o->t1 - o->t0;
+    if (margin < 0.03) margin = 0.03;
+    if (margin > 0.2) margin = 0.2;
+    double half = side_window(p->code);
+    graph_context(rec, o->t0, o->t1, margin, half);
+    commit(rec);
+    /* keep collecting late queries for this burst; drop expired windows */
+    int w = 0;
+    for (int q = 0; q < nposts; q++) if (posts[q].until_side >= o->t1) posts[w++] = posts[q];
+    nposts = w;
+    if (nposts == NPOST) { memmove(posts, posts + 1, sizeof(posts[0]) * (NPOST - 1)); nposts--; }
+    posts[nposts].idx = AS.nhist - 1;
+    posts[nposts].until_side = o->t1 + half;
+    posts[nposts].until_weak = o->t1 + margin;
+    nposts++;
+}
+
+/* stage 2 for the queued queries, in time order, up to the first member of a
+ * burst that is still open */
+static void drain(void)
+{
+    while (ot < oh) {
+        struct interrog *y = &outq[ot % OUTQ];
+        if (y->burst >= 0 && burst_still_open(y->burst)) break;
+        ot++;
+        struct pendb *p = y->burst >= 0 ? pb_find(y->burst) : NULL;
+        if (p && !p->valid) { y->burst = -1; p = NULL; }
+        if (!p) y->burst = -1;
+        bool pass = stage2(y, p ? p->code : -1);
+        if (p) {
+            rec_span(&p->rec, y);
+            if (pass) {
+                int ka = rec_add(&p->rec, y);
+                graph_add(&p->rec, y, GP_BEAM, ka);
+            }
+        }
+        double next = ot < oh ? outq[ot % OUTQ].t : 1e300;
+        for (int i = 0; i < NPB; i++) if (pb[i].used && pb[i].ob.t1 < next) finish(&pb[i]);
+    }
+    if (ot == oh) for (int i = 0; i < NPB; i++) if (pb[i].used) finish(&pb[i]);
+}
+
+static void close_burst(int c)
+{
+    struct open_burst *o = &AS.ob[c];
     if (!o->open) return;
     o->open = false;
     int code = -1, bn = 0;
     /* the code sent most often in the beam; SI codes (16+) are counted first,
      * so they win a draw against an II code */
-    for (int c = NCODES - 1; c >= 0; c--) if (o->votes[c] > bn) { bn = o->votes[c]; code = c; }
+    for (int k = NCODES - 1; k >= 0; k--) if (o->votes[k] > bn) { bn = o->votes[k]; code = k; }
     /* IIS 0 alone: an II0 interrogator (SI radars send their code in UF11 and DI 3 too) */
     if (code < 0 && o->iis0) code = 0;
-    /* no code at all, but plain Mode A/C: a plain A/C radar */
-    if (code < 0 && o->plain) code = CODE_PLAIN_AC;
-    bool valid = o->n_raw >= AS.cfg.burst_min;
-
-    static struct burst rec;
-    memset(&rec, 0, sizeof(rec));
-    rec.id = o->id;
-    rec.code = code;
-    rec.partial = o->partial;
-    drain(o->id, code, valid, &rec);
-    if (valid && (AS.cfg.radar_sel < 0 || code == AS.cfg.radar_sel)) AS.last_burst_end = o->t1;
-    /* radar filter: only that radar's bursts. Another radar's burst can hold a
-     * query that passed it (a UF11 of the filtered radar heard in between, or
-     * an all-call paired with one), but the burst is not the filtered radar's */
-    /* the type and aircraft filters only thin out what a burst shows (rec.n
-     * may be 0); the burst itself, and its radar's statistics, stay */
-    if (valid && rec.nall > 0 && (AS.cfg.radar_sel < 0 || code == AS.cfg.radar_sel)) {
-        double margin = o->t1 - o->t0;
-        if (margin < 0.03) margin = 0.03;
-        if (margin > 0.2) margin = 0.2;
-        double half = side_window(code);
-        graph_context(&rec, o->t0, o->t1, margin, half);
-        commit(&rec);
-        /* keep collecting late queries for this burst; drop expired windows */
-        int w = 0;
-        for (int p = 0; p < nposts; p++) if (posts[p].until_side >= o->t1) posts[w++] = posts[p];
-        nposts = w;
-        if (nposts == NPOST) { memmove(posts, posts + 1, sizeof(posts[0]) * (NPOST - 1)); nposts--; }
-        posts[nposts].idx = AS.nhist - 1;
-        posts[nposts].until_side = o->t1 + half;
-        posts[nposts].until_weak = o->t1 + margin;
-        nposts++;
+    /* the legacy A/C detector: a legacy A/C radar */
+    if (code < 0 && o->plain) code = CODE_LEGACY_AC;
+    struct pendb *p = NULL;
+    for (int i = 0; i < NPB && !p; i++) if (!pb[i].used) p = &pb[i];
+    if (p) {
+        p->used = true;
+        p->code = code;
+        p->valid = o->n_raw >= AS.cfg.burst_min;
+        p->ob = *o;
+        memset(&p->rec, 0, sizeof(p->rec));
+        p->rec.id = o->id;
+        p->rec.code = code;
+        p->rec.partial = o->partial;
     }
+    /* no slot (cannot happen with two detectors): its members pass as non-beam */
+    drain();
 }
 
-static void open_burst(const struct interrog *x)
+static void open_burst(int c, const struct interrog *x)
 {
-    struct open_burst *o = &AS.ob;
+    struct open_burst *o = &AS.ob[c];
     memset(o, 0, sizeof(*o));
     o->open = true;
     o->id = next_burst_id++;
@@ -823,14 +896,14 @@ static void open_burst(const struct interrog *x)
     o->partial = x->t - AS.gap_end < 0.1;
 }
 
-/* does a chain of members starting at pending index i reach a core one? */
-static bool chain_reaches_core(uint64_t i)
+/* does a chain of this detector's members starting at pending index i reach a core one? */
+static bool chain_reaches_core(uint64_t i, int c)
 {
     double last = pend[i % PENDING].t;
     for (uint64_t j = i; j < ph; j++) {
         struct interrog *p = &pend[j % PENDING];
         if (p->t - last > AS.cfg.burst_gap) return false;
-        if (!is_member(p)) continue;
+        if (!is_member(p) || query_class(p->kind) != c) continue;
         if (is_core(p)) return true;
         last = p->t;
     }
@@ -839,30 +912,28 @@ static bool chain_reaches_core(uint64_t i)
 
 static void stage1(struct interrog *x, uint64_t idx)
 {
-    struct open_burst *o = &AS.ob;
     if (rx_match) rx_match(x);
     if (!x->tcas) {
-        if (o->open && x->t - o->t1 > AS.cfg.burst_gap) close_burst();
+        for (int c = 0; c < NCLS; c++)
+            if (AS.ob[c].open && x->t - AS.ob[c].t1 > AS.cfg.burst_gap) close_burst(c);
         if (is_member(x)) {
-            if (!o->open && chain_reaches_core(idx)) open_burst(x);
+            int c = query_class(x->kind);
+            struct open_burst *o = &AS.ob[c];
+            if (!o->open && chain_reaches_core(idx, c)) open_burst(c, x);
             if (o->open) {
                 x->burst = o->id;
                 o->n_raw++;
                 o->t1 = x->t;
-                int c = modes_own_code(x);
-                if (c >= 0 && c < NCODES) o->votes[c]++;
+                int k = modes_own_code(x);
+                if (k >= 0 && k < NCODES) o->votes[k]++;
                 else if (modes_iis0(x)) o->iis0++;
-                else if (x->kind <= K_MODED) o->plain++;
+                else if (c == CLS_AC) o->plain++;
             }
         }
     }
-    if (o->open) {
-        outq[oh++ % OUTQ] = *x;
-        if (oh - ot >= OUTQ - 1) close_burst();
-    } else {
-        drain(-1, -1, false, NULL);
-        stage2(x, -1);
-    }
+    outq[oh++ % OUTQ] = *x;
+    if (oh - ot >= OUTQ - 1) for (int c = 0; c < NCLS; c++) close_burst(c);
+    drain();
 }
 
 void analysis_tick(double now)
@@ -877,15 +948,17 @@ void analysis_tick(double now)
     }
     double front = now - LOOKAHEAD;            /* everything before this went through stage 1 */
     if (pt < ph && pend[pt % PENDING].t < front) front = pend[pt % PENDING].t;
-    if (AS.ob.open && front - AS.ob.t1 > AS.cfg.burst_gap) close_burst();
-    if (now >= 1e299) { close_burst(); drain(-1, -1, false, NULL); }
+    for (int c = 0; c < NCLS; c++)
+        if (AS.ob[c].open && (flush || front - AS.ob[c].t1 > AS.cfg.burst_gap)) close_burst(c);
+    if (flush) drain();
 }
 
 void analysis_gap(double t0, double t1)
 {
     analysis_tick(t0 + LOOKAHEAD + 1e-6);
-    if (AS.ob.open) { AS.ob.partial = true; close_burst(); }
-    drain(-1, -1, false, NULL);
+    for (int c = 0; c < NCLS; c++)
+        if (AS.ob[c].open) { AS.ob[c].partial = true; close_burst(c); }
+    drain();
     for (int r = 0; r < AS.nradars; r++) AS.radars[r].gap_since = true;
     AS.gap_end = t1;
 }
@@ -897,7 +970,7 @@ void analysis_print_summary(FILE *f)
     fprintf(f, "\n=== ssr1030 summary: %.1f s analysed, %ld interrogations, %ld passed filters ===\n",
             AS.now, AS.n_all, AS.n_pass);
     if (AS.filt_radar || AS.filt_modes || AS.filt_ac || AS.filt_noac || AS.filt_rollcall || AS.filt_aircraft || AS.filt_ii0)
-        fprintf(f, "filtered out: other/unknown radar %ld, non-Mode S %ld, not plain A/C %ld, plain A/C %ld, "
+        fprintf(f, "filtered out: other/unknown radar %ld, non-Mode S %ld, not legacy A/C %ld, legacy A/C %ld, "
                    "all-call/unaddressed %ld, other aircraft %ld, II0 %ld\n",
                 AS.filt_radar, AS.filt_modes, AS.filt_ac, AS.filt_noac, AS.filt_rollcall, AS.filt_aircraft, AS.filt_ii0);
     if (aircraft_filter_on()) {
@@ -905,8 +978,10 @@ void analysis_print_summary(FILE *f)
         ac_list_str(&AS.cfg, true, l, sizeof(l));
         fprintf(f, "aircraft filter: %s%s\n", l, strstr(l, "(?)") ? "   ((?) = callsign not resolved yet)" : "");
     }
-    fprintf(f, "background (sidelobe) level %.1f dBFS, burst member >= %.1f dBFS, core >= %.1f dBFS\n\n",
-            AS.bg_db, AS.bg_db + AS.cfg.member_db, AS.bg_db + AS.cfg.core_db);
+    fprintf(f, "background (sidelobe) level %.1f dBFS, burst member >= %.1f dBFS, core >= %.1f dBFS; "
+               "legacy Mode A/C (own bursts): %.1f / %.1f / %.1f dBFS\n\n",
+            AS.bg_db, AS.bg_db + AS.cfg.member_db, AS.bg_db + AS.cfg.core_db,
+            AS.bg_ac, AS.bg_ac + AS.cfg.member_db, AS.bg_ac + AS.cfg.core_db);
     fprintf(f, "%-26s %9s %9s %9s\n", "Radar interrogations", "total", "in-beam", "sidelobe");
     long all = krow_all(), oth[3] = { 0 };
     for (int i = 0; i < nkrows; i++) {
@@ -966,7 +1041,7 @@ void analysis_print_summary(FILE *f)
     }
     if (AS.nhist) {
         fprintf(f, "  (* = burst touched an ADS-B window; excluded from per-burst statistics)\n");
-        fprintf(f, "  tokens: A C A/C-only all-call | AA CC plain Mode A/C | As Cs A/C/S all-call | S UF11 all-call\n"
+        fprintf(f, "  tokens: A C A/C-only all-call | AA CC legacy Mode A/C | As Cs A/C/S all-call | S UF11 all-call\n"
                    "          %s | S-msg Comm-A (UF20/21) | S-elm UF24\n",
                 bds_human ? "alt UF4 altitude | sqk UF5 Mode A code" : "UF4 altitude roll-call | UF5 Mode A code roll-call");
         if (bds_human)

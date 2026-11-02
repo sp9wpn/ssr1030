@@ -132,8 +132,8 @@ struct analysis_cfg {
     /* filters */
     int radar_sel;         /* radar code to keep, -1 = all */
     bool modes_only;       /* drop Mode A/C and intermode interrogations */
-    bool ac_only;          /* keep only plain Mode A/C (no P4), as sent by older SSR radars */
-    bool no_ac;            /* drop plain Mode A/C (AA/CC) */
+    bool ac_only;          /* keep only legacy Mode A/C (no P4), as sent by older SSR radars */
+    bool no_ac;            /* drop legacy Mode A/C (AA/CC) */
     bool ii0_only;         /* keep only II0 queries (see is_ii0 in analysis.c) */
     bool no_ii0;           /* drop II0 queries */
     bool rollcall_only;    /* keep only interrogations addressed to an aircraft */
